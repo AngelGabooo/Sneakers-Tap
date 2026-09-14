@@ -1,33 +1,49 @@
-import { useEffect, useRef, useState } from 'react'
-import { Search, ScanLine, X } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { Search, ScanLine, X, Zap } from 'lucide-react'
 
-/**
- * Barra de búsqueda + scanner.
- * El input captura automáticamente el código del lector de barras/QR
- * (los lectores escriben como si fuera un teclado y terminan con Enter).
- */
 export default function PosSearchBar({
   value,
   onChange,
-  onScan,        // se dispara al recibir un código escaneado (con Enter)
+  onScan,
   autoFocus = true,
+  refocusOnIdle = true,
 }) {
   const inputRef = useRef(null)
   const [flash, setFlash] = useState(false)
 
-  // Foco automático al montar y cuando se limpia
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
   }, [autoFocus])
 
+  useEffect(() => {
+    if (!refocusOnIdle) return
+    const refocus = () => {
+      const active = document.activeElement
+      const isTypingElsewhere =
+        active &&
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) &&
+        active !== inputRef.current
+      if (!isTypingElsewhere) inputRef.current?.focus()
+    }
+    const t = setInterval(refocus, 800)
+    return () => clearInterval(t)
+  }, [refocusOnIdle])
+
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus()
+  }, [])
+
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && value.trim()) {
+    if (e.key === 'Enter') {
       e.preventDefault()
-      onScan?.(value.trim())
-      onChange?.('')
-      // Feedback visual breve
-      setFlash(true)
-      setTimeout(() => setFlash(false), 250)
+      const code = String(value || '').trim()
+      if (code) {
+        onScan?.(code)
+        onChange?.('')
+        setFlash(true)
+        setTimeout(() => setFlash(false), 300)
+      }
+      requestAnimationFrame(focusInput)
     }
   }
 
@@ -48,8 +64,11 @@ export default function PosSearchBar({
         onKeyDown={handleKeyDown}
         placeholder="Buscar producto, SKU o escanear código de barras..."
         autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck="false"
         className="
-          w-full h-12 pl-10 pr-24 rounded-lg text-[15px]
+          w-full h-12 pl-10 pr-28 rounded-lg text-[15px]
           bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
           border border-gray-200 dark:border-dark-border
           focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
@@ -58,30 +77,32 @@ export default function PosSearchBar({
         "
       />
 
-      {/* Botón para pegar/limpiar */}
       {value ? (
         <button
           type="button"
-          onClick={() => { onChange?.(''); inputRef.current?.focus() }}
-          className="absolute inset-y-0 right-14 pr-2 flex items-center text-gray-400 hover:text-brand-black dark:hover:text-dark-text transition-colors"
+          onClick={() => { onChange?.(''); focusInput() }}
+          className="absolute inset-y-0 right-24 pr-2 flex items-center text-gray-400 hover:text-brand-black dark:hover:text-dark-text transition-colors"
           aria-label="Limpiar"
         >
           <X size={16} />
         </button>
       ) : null}
 
-      {/* Scanner */}
+      <span className="absolute inset-y-0 right-16 flex items-center">
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+          <Zap size={11} strokeWidth={2.4} />
+          Listo
+        </span>
+      </span>
+
       <button
         type="button"
-        onClick={() => {
-          inputRef.current?.focus()
-          onScan?.(null)
-        }}
+        onClick={focusInput}
         className="
           absolute inset-y-0 right-0 pr-3 flex items-center gap-1
           text-xs font-medium text-brand-blue hover:text-brand-blueDark transition-colors
         "
-        title="El lector escribe automáticamente. Solo escanea."
+        title="Reactivar foco para escanear"
       >
         <ScanLine size={16} strokeWidth={2.2} />
         <span className="hidden sm:inline">Escanear</span>

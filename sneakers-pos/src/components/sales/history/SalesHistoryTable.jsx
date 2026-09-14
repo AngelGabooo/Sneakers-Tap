@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, Receipt, Search } from 'lucide-react'
+import { ArrowUp, ArrowDown, Receipt, Search, User, Building2 } from 'lucide-react'
 import Card from '../../common/Card'
 import Badge from '../../common/Badge'
 import Checkbox from '../../common/Checkbox'
@@ -8,12 +8,12 @@ import SalesHistoryTableSkeleton from './SalesHistoryTableSkeleton'
 import SalesHistoryPagination from './SalesHistoryPagination'
 
 const STATUS = {
-  completed:      { label: 'Completada',             variant: 'success' },
-  pending:        { label: 'Pendiente',              variant: 'warning' },
-  partial_return: { label: 'Parcialmente devuelta',  variant: 'info' },
-  returned:       { label: 'Devuelta',               variant: 'neutral' },
-  cancelled:      { label: 'Cancelada',              variant: 'danger' },
-  refunded:       { label: 'Reembolsada',            variant: 'neutral' },
+  completed:      { label: 'Completada',            variant: 'success' },
+  pending:        { label: 'Pendiente',             variant: 'warning' },
+  partial_return: { label: 'Parcialmente devuelta', variant: 'info' },
+  returned:       { label: 'Devuelta',              variant: 'neutral' },
+  cancelled:      { label: 'Cancelada',             variant: 'danger' },
+  refunded:       { label: 'Reembolsada',           variant: 'neutral' },
 }
 
 export default function SalesHistoryTable({
@@ -76,45 +76,36 @@ export default function SalesHistoryTable({
     <Card padded={false} className="overflow-hidden">
       {loading && <SalesHistoryTableSkeleton rows={6} />}
 
-      {/* Sin resultados por búsqueda o filtros */}
       {!loading && !hasSales && (searchQuery || filtersActive) && (
         <EmptyState
           icon={Search}
           title="No encontramos ventas"
           description="Prueba con otros términos de búsqueda o modifica los filtros."
           action={
-            <button
-              onClick={onClearAll}
-              className="text-sm font-medium text-brand-blue hover:underline"
-            >
+            <button onClick={onClearAll} className="text-sm font-medium text-brand-blue hover:underline">
               Limpiar filtros
             </button>
           }
         />
       )}
 
-      {/* Estado vacío inicial */}
       {!loading && !hasSales && !searchQuery && !filtersActive && (
         <EmptyState
           icon={Receipt}
           title="Aún no hay ventas"
           description="Las ventas que registres desde el punto de venta aparecerán aquí."
           action={
-            <button
-              onClick={onGoToPos}
-              className="text-sm font-medium text-brand-blue hover:underline"
-            >
+            <button onClick={onGoToPos} className="text-sm font-medium text-brand-blue hover:underline">
               Nueva venta
             </button>
           }
         />
       )}
 
-      {/* Tabla */}
       {!loading && hasSales && (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[1080px]">
+            <table className="w-full text-sm min-w-[1180px]">
               <thead>
                 <tr className="border-b border-gray-100 dark:border-dark-border bg-gray-50/60 dark:bg-dark-surface/60">
                   <th className="w-10 px-4 py-3">
@@ -128,9 +119,7 @@ export default function SalesHistoryTable({
 
                   <ThSortable field="createdAt">Fecha y hora</ThSortable>
                   <ThSortable field="folio">Venta</ThSortable>
-                  <ThSortable field="customerName" className="min-w-[180px]">
-                    Cliente
-                  </ThSortable>
+                  <ThSortable field="customerName" className="min-w-[220px]">Cliente</ThSortable>
                   <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-muted whitespace-nowrap">
                     Productos
                   </th>
@@ -153,6 +142,9 @@ export default function SalesHistoryTable({
                   const status = STATUS[sale.status] || STATUS.completed
                   const itemCount = (sale.items || []).length
                   const created = new Date(sale.createdAt)
+                  const isWholesale = sale.customerType === 'wholesale'
+                  const wholesaleName = sale.wholesaleSnapshot?.name
+                  const wholesaleDiscount = sale.wholesaleSnapshot?.defaultDiscount
 
                   return (
                     <tr
@@ -176,16 +168,10 @@ export default function SalesHistoryTable({
                       {/* Fecha y hora */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <p className="text-sm text-brand-black dark:text-dark-text font-medium">
-                          {created.toLocaleDateString('es-MX', {
-                            day: '2-digit',
-                            month: 'short',
-                          })}
+                          {created.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-dark-muted">
-                          {created.toLocaleTimeString('es-MX', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+                          {created.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </td>
 
@@ -202,12 +188,26 @@ export default function SalesHistoryTable({
                       {/* Cliente */}
                       <td className="px-4 py-3">
                         {sale.customerName ? (
-                          <button
-                            onClick={() => onViewCustomer?.(sale.customerId)}
-                            className="text-sm text-brand-black dark:text-dark-text hover:text-brand-blue truncate block text-left transition-colors"
-                          >
-                            {sale.customerName}
-                          </button>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                onClick={() => onViewCustomer?.(sale.customerId)}
+                                className="text-sm text-brand-black dark:text-dark-text hover:text-brand-blue truncate text-left transition-colors"
+                              >
+                                {sale.customerName}
+                              </button>
+                              {isWholesale && (
+                                <Badge variant="info">
+                                  Mayorista{wholesaleDiscount ? ` · ${wholesaleDiscount}%` : ''}
+                                </Badge>
+                              )}
+                            </div>
+                            {wholesaleName && wholesaleName !== sale.customerName && (
+                              <p className="text-xs text-gray-500 dark:text-dark-muted truncate mt-0.5">
+                                {wholesaleName}
+                              </p>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-sm text-gray-500 dark:text-dark-muted">
                             Venta general

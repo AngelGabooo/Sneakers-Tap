@@ -36,11 +36,6 @@ const INITIAL_FORM = {
   status: 'active',
 }
 
-/**
- * Construye la lista completa de variantes
- * a partir de tallas × colores × SKU base.
- * Conserva el stock previo si la variante ya existía.
- */
 function buildVariants(nextSizes, nextColors, baseSku, previous = []) {
   if (!baseSku || nextSizes.length === 0 || nextColors.length === 0) return []
   const prevMap = new Map(previous.map((v) => [v.id, v]))
@@ -58,7 +53,7 @@ function buildVariants(nextSizes, nextColors, baseSku, previous = []) {
         size,
         color,
         sku,
-        barcode,
+        barcode: String(barcode),
         stock: prev?.stock ?? 0,
       })
     })
@@ -79,18 +74,10 @@ export default function ProductCreate() {
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState(null)
 
-  // Tipo de código (barcode | qr) que viene de Identificación
   const [codeType, setCodeType] = useState('barcode')
-
   const barcodeAutoRef = useRef(true)
 
-  // 🚧 TODO: cargar desde backend
-  const options = {
-    categories: [],
-    brands: [],
-    locations: [],
-    suppliers: [],
-  }
+  const options = { categories: [], brands: [], locations: [], suppliers: [] }
 
   // -------------------------------------------------------------
   // Cambios en el formulario
@@ -107,7 +94,7 @@ export default function ProductCreate() {
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
-  // 🔑 Auto-generación del código base (identificador del producto raíz)
+  // 🔑 Auto-generación del código base
   useEffect(() => {
     if (!barcodeAutoRef.current) return
     if (!form.name || !form.sku) return
@@ -118,7 +105,7 @@ export default function ProductCreate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.name, form.sku])
 
-  // 🔄 Regenerar variantes cuando cambian tallas, colores o SKU base
+  // 🔄 Regenerar variantes
   useEffect(() => {
     setVariants((prev) => buildVariants(sizes, colors, form.sku, prev))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,9 +114,6 @@ export default function ProductCreate() {
   const handleChangeSizes = (next) => setSizes(next)
   const handleChangeColors = (next) => setColors(next)
 
-  // -------------------------------------------------------------
-  // SKU y código base
-  // -------------------------------------------------------------
   const handleGenerateSku = () => {
     const sku = generateSku({ brand: form.brand, name: form.name })
     setForm((f) => ({ ...f, sku }))
@@ -145,9 +129,6 @@ export default function ProductCreate() {
 
   const handleScan = () => console.log('Escanear código de barras')
 
-  // -------------------------------------------------------------
-  // Validación y guardado
-  // -------------------------------------------------------------
   const validate = () => {
     const e = {}
     if (!form.name.trim()) e.name = 'El nombre del producto es obligatorio.'
@@ -161,22 +142,49 @@ export default function ProductCreate() {
     return Object.keys(e).length === 0
   }
 
+  // -------------------------------------------------------------
+  // Guardar
+  // -------------------------------------------------------------
   const handleSubmit = () => {
     if (!validate()) return
     setSubmitting(true)
 
+    // 🔑 Asegurar que cada variante tenga barcode
+    const safeVariants = variants.map((v) => {
+      const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
+      const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
+      return {
+        ...v,
+        sku: String(variantSku || ''),
+        barcode: String(variantBarcode || ''),
+      }
+    })
+
     const payload = {
       ...form,
+      barcode: String(form.barcode || ''),
+      sku: String(form.sku || ''),
+      variants: safeVariants,
       sizes,
       colors,
-      variants,
       codeType,
       images: images.map(({ id, isPrimary, url }) => ({ id, isPrimary, url })),
     }
 
-    // 🚧 TODO: POST /api/products
+    // 🔎 Diagnóstico
+    console.log('🔎 Producto a guardar:', {
+      name: payload.name,
+      sku: payload.sku,
+      barcode: payload.barcode,
+      variants: payload.variants.map((v) => ({
+        label: v.label,
+        barcode: v.barcode,
+        stock: v.stock,
+      })),
+    })
+
     const created = createProduct(payload)
-    console.log('Producto creado →', created)
+    console.log('✅ Producto creado:', created)
 
     setTimeout(() => {
       setSubmitting(false)
@@ -197,9 +205,6 @@ export default function ProductCreate() {
   const handleBack = () => setActiveView('products')
   const handleNavigate = (key) => setActiveView(key)
 
-  // -------------------------------------------------------------
-  // Derivados
-  // -------------------------------------------------------------
   const summary = useMemo(() => ({
     name: form.name,
     category: form.category,
@@ -209,7 +214,6 @@ export default function ProductCreate() {
     totalStock: variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0),
   }), [form, variants])
 
-  // 👇 Resumen de inventario para la sección Inventario
   const inventorySummary = useMemo(() => {
     const totalStock = variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
     const minStock = Number(form.minStock) || 0
@@ -217,12 +221,7 @@ export default function ProductCreate() {
       (v) => Number(v.stock) > 0 && Number(v.stock) <= minStock,
     ).length
     const outOfStockCount = variants.filter((v) => Number(v.stock) === 0).length
-    return {
-      totalStock,
-      variantsCount: variants.length,
-      lowStockCount,
-      outOfStockCount,
-    }
+    return { totalStock, variantsCount: variants.length, lowStockCount, outOfStockCount }
   }, [variants, form.minStock])
 
   const preview = useMemo(() => ({
@@ -233,9 +232,6 @@ export default function ProductCreate() {
     imageUrl: images[0]?.url || null,
   }), [form, images])
 
-  // -------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------
   return (
     <DashboardLayout
       activeKey="products"
@@ -252,13 +248,7 @@ export default function ProductCreate() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
-          <ProductGeneralSection
-            values={form}
-            errors={errors}
-            onChange={handleChange}
-            options={options}
-          />
-
+          <ProductGeneralSection values={form} errors={errors} onChange={handleChange} options={options} />
           <ProductIdentificationSection
             values={form}
             errors={errors}
@@ -268,11 +258,8 @@ export default function ProductCreate() {
             onScan={handleScan}
             onCodeTypeChange={setCodeType}
           />
-
           <ProductImagesSection images={images} onChange={setImages} />
-
           <ProductPricingSection values={form} errors={errors} onChange={handleChange} />
-
           <ProductVariantsSection
             sizes={sizes}
             colors={colors}
@@ -285,7 +272,6 @@ export default function ProductCreate() {
             onChangeColors={handleChangeColors}
             onChangeVariantsBulk={setVariants}
           />
-
           <ProductInventorySection
             values={form}
             errors={errors}
@@ -293,7 +279,6 @@ export default function ProductCreate() {
             options={options}
             summary={inventorySummary}
           />
-
           <ProductSupplierSection
             values={form}
             onChange={handleChange}
@@ -321,10 +306,7 @@ export default function ProductCreate() {
         </div>
 
         <aside className="lg:col-span-1 space-y-5 lg:sticky lg:top-20 lg:self-start">
-          <ProductStatusPanel
-            value={form.status}
-            onChange={(v) => handleChange('status', v)}
-          />
+          <ProductStatusPanel value={form.status} onChange={(v) => handleChange('status', v)} />
           <ProductSummaryPanel summary={summary} />
           <ProductPreviewPanel preview={preview} />
         </aside>

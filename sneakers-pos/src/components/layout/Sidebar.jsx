@@ -3,7 +3,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ShoppingBag,
   Wallet, Users, UserCog, ShieldCheck, BarChart3, Bell,
   History, Settings, X, Activity, AlertTriangle, SlidersHorizontal,
-  Receipt, // 👈 NUEVO
+  Receipt,
 } from 'lucide-react'
 import SneakersLogo from '../login/SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
@@ -15,13 +15,13 @@ const NAV_SECTIONS = [
     items: [
       { key: 'dashboard',     label: 'Dashboard',           icon: LayoutDashboard },
       { key: 'pos',           label: 'Punto de venta',      icon: ShoppingCart },
-      { key: 'sales-history', label: 'Historial de ventas', icon: Receipt }, // 👈 NUEVO
+      { key: 'sales-history', label: 'Historial de ventas', icon: Receipt },
     ],
   },
   {
     label: 'Catálogo',
     items: [
-      { key: 'products',  label: 'Productos', icon: Package },
+      { key: 'products', label: 'Productos', icon: Package },
     ],
   },
   {
@@ -40,21 +40,29 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    label: 'Caja',
+    items: [
+      { key: 'cash-open',    label: 'Apertura de caja', icon: Wallet },
+      { key: 'cash-current', label: 'Caja actual',      icon: Wallet },
+      { key: 'cash-close',   label: 'Cierre de caja',   icon: Wallet },
+      { key: 'cash-history', label: 'Historial de cajas', icon: History },
+    ],
+  },
+  {
     label: 'Operación',
     items: [
-      { key: 'cash',          label: 'Caja', icon: Wallet },
-      { key: 'customers',     label: 'Clientes', icon: Users },
-      { key: 'wholesale',     label: 'Clientes mayoristas', icon: UserCog },
+      { key: 'customers',  label: 'Clientes',           icon: Users },
+      { key: 'wholesale',  label: 'Clientes mayoristas', icon: UserCog },
     ],
   },
   {
     label: 'Administración',
     items: [
-      { key: 'users',     label: 'Usuarios y empleados', icon: Users },
-      { key: 'roles',     label: 'Roles y permisos', icon: ShieldCheck },
-      { key: 'reports',   label: 'Reportes', icon: BarChart3 },
-      { key: 'alerts',    label: 'Alertas', icon: Bell },
-      { key: 'audit',     label: 'Historial y auditoría', icon: History },
+      { key: 'users',   label: 'Usuarios y empleados', icon: Users },
+      { key: 'roles',   label: 'Roles y permisos',     icon: ShieldCheck },
+      { key: 'reports', label: 'Reportes',             icon: BarChart3 },
+      { key: 'alerts',  label: 'Alertas',              icon: Bell },
+      { key: 'audit',   label: 'Historial y auditoría', icon: History },
     ],
   },
   {

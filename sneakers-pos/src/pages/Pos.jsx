@@ -19,6 +19,7 @@ import { useCart } from '../context/CartContext'
 import { useProducts } from '../context/ProductsContext'
 import { useSales } from '../context/SalesContext'
 import { useCash } from '../context/CashContext'
+import { openCashDrawer, printReceipt } from '../services/printerService'
 
 export default function Pos() {
   const { navigate } = useView()
@@ -31,7 +32,6 @@ export default function Pos() {
     setCustomer,
   } = useCart()
 
-  // 🔑 Caja actual desde CashContext
   const openSession = getAnyOpenSession()
   const cashOpen = !!openSession
   const cashId = openSession?.cashLabel || 'Sin caja'
@@ -50,7 +50,6 @@ export default function Pos() {
   const [ticketOpen, setTicketOpen] = useState(false)
   const [toast, setToast] = useState(null)
 
-  // 📱 Panel del carrito en móvil
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
 
   useEffect(() => {
@@ -59,6 +58,9 @@ export default function Pos() {
     return () => clearTimeout(t)
   }, [])
 
+  // -------------------------------------------------------------
+  // Filtro de productos
+  // -------------------------------------------------------------
   const filtered = useMemo(() => {
     let list = [...products]
 
@@ -85,11 +87,32 @@ export default function Pos() {
     return list
   }, [products, category, search])
 
-  const handleScan = (code) => {
+  // -------------------------------------------------------------
+  // 🔑 Scanner robusto
+  // -------------------------------------------------------------
+  const sameCode = (a, b) => {
+    const A = String(a || '').trim()
+    const B = String(b || '').trim()
+    if (!A || !B) return false
+    if (A === B) return true
+    if (A.replace(/^0+/, '') === B.replace(/^0+/, '')) return true
+    if (A.length >= 8 && B.length >= 8 && A.slice(-8) === B.slice(-8)) return true
+    return false
+  }
+
+  const handleScan = (rawCode) => {
+    if (!rawCode) return
+
+    const code = String(rawCode)
+      .trim()
+      .replace(/^\*+|\*+$/g, '')
+      .replace(/[\r\n\t]+/g, '')
+
     if (!code) return
 
+    // 1) barcode en variantes
     for (const p of products) {
-      const variant = (p.variants || []).find((v) => v.barcode === code)
+      const variant = (p.variants || []).find((v) => sameCode(v.barcode, code))
       if (variant) {
         addItem(p, variant, 1)
         setToast({
@@ -98,7 +121,37 @@ export default function Pos() {
         })
         return
       }
-      if (p.barcode === code) {
+    }
+
+    // 2) barcode en producto
+    for (const p of products) {
+      if (sameCode(p.barcode, code)) {
+        if ((p.variants || []).length > 0) {
+          setVariantProduct(p)
+        } else {
+          addItem(p, null, 1)
+          setToast({ title: 'Producto agregado al carrito', description: p.name })
+        }
+        return
+      }
+    }
+
+    // 3) SKU en variantes
+    for (const p of products) {
+      const variant = (p.variants || []).find((v) => sameCode(v.sku, code))
+      if (variant) {
+        addItem(p, variant, 1)
+        setToast({
+          title: 'Producto agregado al carrito',
+          description: `${p.name} · ${variant.label}`,
+        })
+        return
+      }
+    }
+
+    // 4) SKU en producto
+    for (const p of products) {
+      if (sameCode(p.sku, code)) {
         if ((p.variants || []).length > 0) {
           setVariantProduct(p)
         } else {
@@ -137,15 +190,10 @@ export default function Pos() {
     clear()
   }
 
-  /**
-   * 🔑 Al confirmar la venta:
-   * 1. Validar que haya caja abierta.
-   * 2. Guardar la venta completa en SalesContext.
-   * 3. Asociarla a la sesión de caja activa.
-   * 4. Mostrar el modal de éxito.
-   */
-  const handleConfirmSale = (payment) => {
-    // Bloqueo duro: no permitir cobrar sin caja abierta
+  // -------------------------------------------------------------
+  // Cobro — abrir cajón si es efectivo
+  // -------------------------------------------------------------
+  const handleConfirmSale = async (payment) => {
     if (!cashOpen) {
       setToast({
         title: 'No hay una caja abierta',
@@ -154,77 +202,137 @@ export default function Pos() {
       return
     }
 
+    if (customer?.isWholesale) {
+      const minAmount = Number(customer.minPurchaseAmount) || 0
+      const minUnits = Number(customer.minPurchaseUnits) || 0
+
+      if (minAmount > 0 && totals.subtotal < minAmount) {
+        setToast({
+          title: 'Compra mínima no cumplida',
+          description: `Este mayorista requiere un mínimo de $${minAmount.toLocaleString('es-MX')}.`,
+        })
+        return
+      }
+
+      if (minUnits > 0) {
+        const totalUnits = items.reduce((a, i) => a + i.quantity, 0)
+        if (totalUnits < minUnits) {
+          setToast({
+            title: 'Unidades mínimas no cumplidas',
+            description: `Este mayorista requiere mínimo ${minUnits} unidades.`,
+          })
+          return
+        }
+      }
+    }
+
     setSubmitting(true)
 
-    setTimeout(() => {
-      const methodLabel =
-        payment.method === 'cash' ? 'Efectivo'
-        : payment.method === 'card'
-          ? `Tarjeta (${payment.cardType === 'credit' ? 'Crédito' : 'Débito'})`
-        : payment.method === 'transfer' ? 'Transferencia'
-        : payment.method === 'digital' ? 'Pago digital'
-        : 'Otro'
+    const methodLabel =
+      payment.method === 'cash' ? 'Efectivo'
+      : payment.method === 'card'
+        ? `Tarjeta (${payment.cardType === 'credit' ? 'Crédito' : 'Débito'})`
+      : payment.method === 'transfer' ? 'Transferencia'
+      : payment.method === 'digital' ? 'Pago digital'
+      : 'Otro'
 
-      // 1. Guardar la venta completa
-      const sale = createSale({
-        cashier: 'Henry Sneakers',
-        cashierRole: 'Administrador',
-        customerId: customer?.id || null,
-        customerName: customer?.name || null,
-        customerType: customer?.isWholesale ? 'wholesale' : 'regular',
-        items: items.map((i) => ({
-          key: i.key,
-          productId: i.productId,
-          productName: i.productName,
-          variantId: i.variantId,
-          variantLabel: i.variantLabel,
-          sku: i.sku,
-          imageUrl: i.imageUrl,
-          price: i.price,
-          quantity: i.quantity,
-        })),
-        totals: {
-          subtotal: totals.subtotal,
-          discountAmount: totals.discountAmount,
-          tax: totals.tax,
-          total: totals.total,
-        },
-        payment: {
-          method: payment.method,
-          methodLabel,
-          cashReceived: payment.cashReceived || null,
-          cardType: payment.cardType || null,
-          reference: payment.reference || null,
-          change: payment.change || 0,
-        },
-        change: payment.change || 0,
+    const wholesaleSnapshot = customer?.isWholesale
+      ? {
+          id: customer.id,
+          name: customer.name,
+          condition: customer.condition,
+          priceList: customer.priceList,
+          defaultDiscount: customer.defaultDiscount,
+          minPurchaseAmount: customer.minPurchaseAmount,
+          minPurchaseUnits: customer.minPurchaseUnits,
+          creditAvailable: customer.creditAvailable,
+        }
+      : null
+
+    const sale = createSale({
+      cashier: 'Henry Sneakers',
+      cashierRole: 'Administrador',
+      customerId: customer?.id || null,
+      customerName: customer?.name || null,
+      customerType: customer?.isWholesale ? 'wholesale' : 'regular',
+      wholesaleSnapshot,
+      items: items.map((i) => ({
+        key: i.key,
+        productId: i.productId,
+        productName: i.productName,
+        variantId: i.variantId,
+        variantLabel: i.variantLabel,
+        sku: i.sku,
+        imageUrl: i.imageUrl,
+        price: i.price,
+        basePrice: i.basePrice,
+        quantity: i.quantity,
+      })),
+      totals: {
+        subtotal: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        wholesaleDiscountAmount: totals.wholesaleDiscountAmount,
+        extraDiscount: totals.extraDiscount,
+        tax: totals.tax,
         total: totals.total,
-        branch: cashBranch,
-        cashId,
-        cashSessionId: openSession?.id || null,
-        cashRegisterId: openSession?.id || 'CAJ-000001',
-        notes: '',
-      })
-
-      // 🚧 TODO: cuando conectes backend, aquí irá:
-      // - POST /api/sales
-      // - POST /api/inventory/movements por cada item
-      // - PUT /api/products/:id (stock)
-      // - POST /api/cash/sessions/:id/movements
-      // - POST /api/audit
-
-      setSuccessSale({
-        ...sale,
+      },
+      payment: {
+        method: payment.method,
         methodLabel,
-      })
+        cashReceived: payment.cashReceived || null,
+        cardType: payment.cardType || null,
+        reference: payment.reference || null,
+        change: payment.change || 0,
+      },
+      change: payment.change || 0,
+      total: totals.total,
+      branch: cashBranch,
+      cashId,
+      cashSessionId: openSession?.id || null,
+      cashRegisterId: openSession?.id || 'CAJ-000001',
+      notes: '',
+    })
 
-      setCheckoutOpen(false)
-      setSubmitting(false)
-    }, 700)
+    const fullSale = { ...sale, methodLabel }
+    setSuccessSale(fullSale)
+    setCheckoutOpen(false)
+    setSubmitting(false)
+
+    // 🔑 Abrir cajón automáticamente si es efectivo
+    if (payment.method === 'cash') {
+      const result = await openCashDrawer()
+      if (!result.ok) {
+        console.warn('⚠️ No se pudo abrir el cajón:', result.error)
+        setToast({
+          title: 'Cajón no disponible',
+          description: 'Verifica que el servidor de impresión esté corriendo.',
+        })
+      } else {
+        console.log('✅ Cajón GHIA abierto')
+      }
+    }
   }
 
-  const handlePrintTicket = () => {
+  // -------------------------------------------------------------
+  // Imprimir ticket — primero backend, si falla abre el modal
+  // -------------------------------------------------------------
+  const handlePrintTicket = async () => {
     if (!successSale) return
+
+    // 1) Intentar imprimir con el backend local
+    const result = await printReceipt(successSale)
+
+    if (result.ok) {
+      console.log('✅ Ticket impreso por GTP58B1')
+      setToast({
+        title: 'Ticket impreso',
+        description: `Se imprimió el ticket ${successSale.folio}.`,
+      })
+      return
+    }
+
+    // 2) Fallback: abrir el modal con window.print()
+    console.warn('⚠️ Backend de impresión no disponible, usando fallback:', result.error)
     setTicketOpen(true)
   }
 
@@ -254,15 +362,12 @@ export default function Pos() {
     setMobileCartOpen(false)
   }
 
-  /** 🔑 Navega al detalle de la venta guardada */
   const handleViewSaleDetail = () => {
     const saleId = successSale?.id
     setSuccessSale(null)
     setTicketOpen(false)
     clear()
-    if (saleId) {
-      navigate('sale-detail', { id: saleId })
-    }
+    if (saleId) navigate('sale-detail', { id: saleId })
   }
 
   const cartCount = items.reduce((acc, i) => acc + i.quantity, 0)
@@ -274,19 +379,11 @@ export default function Pos() {
       period={undefined}
       onPeriodChange={undefined}
     >
-      {/* Contenedor principal: altura de viewport SOLO en md+ */}
       <div className="flex flex-col md:h-[calc(100vh-112px)] md:min-h-[640px] gap-3">
-
-        {/* Header del POS (solo en desktop) */}
         <div className="hidden md:block shrink-0">
-          <PosHeader
-            cashOpen={cashOpen}
-            cashId={cashId}
-            location={cashBranch}
-          />
+          <PosHeader cashOpen={cashOpen} cashId={cashId} location={cashBranch} />
         </div>
 
-        {/* Header móvil compacto */}
         <div className="md:hidden flex items-center justify-between gap-2 shrink-0">
           <div>
             <h1 className="text-lg font-bold text-brand-black dark:text-dark-text">
@@ -298,36 +395,17 @@ export default function Pos() {
           </div>
         </div>
 
-        {/* Banner de caja */}
-        <PosCashStatusBanner
-          open={cashOpen}
-          onOpenCash={() => navigate('cash-open')}
-        />
+        <PosCashStatusBanner open={cashOpen} onOpenCash={() => navigate('cash-open')} />
 
-        {/* Layout principal: 2 columnas desde md */}
         <div className="flex-1 flex gap-4 min-h-0">
-
-          {/* ============ COLUMNA IZQUIERDA: PRODUCTOS ============ */}
           <div className="flex-1 flex flex-col gap-3 min-h-0">
-            <PosSearchBar
-              value={search}
-              onChange={setSearch}
-              onScan={handleScan}
-            />
-
+            <PosSearchBar value={search} onChange={setSearch} onScan={handleScan} />
             <PosCategories active={category} onChange={setCategory} />
-
-            {/* Grid con scroll propio */}
             <div className="flex-1 overflow-y-auto min-h-0 pr-1 -mr-1">
-              <PosProductGrid
-                products={filtered}
-                loading={loading}
-                onProductClick={handleProductClick}
-              />
+              <PosProductGrid products={filtered} loading={loading} onProductClick={handleProductClick} />
             </div>
           </div>
 
-          {/* ============ COLUMNA DERECHA: CARRITO (md+) ============ */}
           <aside className="hidden md:flex md:w-[360px] lg:w-[420px] xl:w-[460px] 2xl:w-[520px] shrink-0 min-h-0">
             <div className="w-full h-full">
               <PosCart
@@ -338,14 +416,8 @@ export default function Pos() {
                 onRemove={removeItem}
                 onClear={handleClearCart}
                 onOpenCustomer={() => setCustomerOpen(true)}
-                onOpenDiscount={() => setToast({
-                  title: 'Descuento',
-                  description: 'Función pendiente de implementación.',
-                })}
-                onOpenNote={() => setToast({
-                  title: 'Nota',
-                  description: 'Función pendiente de implementación.',
-                })}
+                onOpenDiscount={() => setToast({ title: 'Descuento', description: 'Función pendiente.' })}
+                onOpenNote={() => setToast({ title: 'Nota', description: 'Función pendiente.' })}
                 onOpenSuspend={() => setSuspendOpen(true)}
                 onCheckout={() => setCheckoutOpen(true)}
               />
@@ -354,7 +426,6 @@ export default function Pos() {
         </div>
       </div>
 
-      {/* ============ BARRA FLOTANTE DEL CARRITO (solo móvil) ============ */}
       <PosCartMobileBar
         count={cartCount}
         total={totals.total}
@@ -362,14 +433,12 @@ export default function Pos() {
         hidden={items.length === 0}
       />
 
-      {/* ============ PANEL LATERAL DEL CARRITO (solo móvil) ============ */}
       {mobileCartOpen && (
         <>
           <div
             className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm md:hidden"
             onClick={() => setMobileCartOpen(false)}
           />
-
           <div className="fixed inset-y-0 right-0 z-[61] w-full sm:w-[420px] bg-white dark:bg-dark-card border-l border-gray-200 dark:border-dark-border shadow-cardHover md:hidden">
             <PosCart
               items={items}
@@ -379,19 +448,10 @@ export default function Pos() {
               onRemove={removeItem}
               onClear={handleClearCart}
               onOpenCustomer={() => setCustomerOpen(true)}
-              onOpenDiscount={() => setToast({
-                title: 'Descuento',
-                description: 'Función pendiente de implementación.',
-              })}
-              onOpenNote={() => setToast({
-                title: 'Nota',
-                description: 'Función pendiente de implementación.',
-              })}
+              onOpenDiscount={() => setToast({ title: 'Descuento', description: 'Función pendiente.' })}
+              onOpenNote={() => setToast({ title: 'Nota', description: 'Función pendiente.' })}
               onOpenSuspend={() => setSuspendOpen(true)}
-              onCheckout={() => {
-                setMobileCartOpen(false)
-                setCheckoutOpen(true)
-              }}
+              onCheckout={() => { setMobileCartOpen(false); setCheckoutOpen(true) }}
               onClose={() => setMobileCartOpen(false)}
               showCloseButton
             />
@@ -399,7 +459,6 @@ export default function Pos() {
         </>
       )}
 
-      {/* ============ MODALES ============ */}
       <PosVariantSelector
         open={!!variantProduct}
         product={variantProduct}

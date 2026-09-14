@@ -1,51 +1,66 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 const CartContext = createContext(null)
 
 export function CartProvider({ children }) {
-  const [items, setItems] = useState([])           // items del carrito
-  const [customer, setCustomer] = useState(null)   // { id, name, isWholesale, discount }
-  const [discount, setDiscount] = useState(null)   // { type: 'percent'|'amount', value, scope: 'cart'|'item', itemId }
+  const [items, setItems] = useState([])
+  const [customer, setCustomer] = useState(null)
+  const [manualDiscount, setManualDiscount] = useState(null) // descuento manual independiente
   const [note, setNote] = useState('')
 
   /**
-   * Agrega un item al carrito.
-   * @param {object} product   - producto padre
-   * @param {object} variant   - variante seleccionada (o null si producto sin variantes)
-   * @param {number} quantity
+   * Factor multiplicador del precio según el cliente mayorista.
    */
-  const addItem = useCallback((product, variant, quantity = 1) => {
-    const key = variant ? `${product.id}__${variant.id}` : `${product.id}__root`
-    const price = Number(product.salePrice) || 0
-    const variantLabel = variant?.label || '—'
-    const sku = variant?.sku || product.sku || ''
-    const stock = variant ? Number(variant.stock) || 0 : Number(product.initialStock) || 0
+  const priceFactor = useMemo(() => {
+    if (!customer?.isWholesale) return 1
+    const d = Number(customer.defaultDiscount) || 0
+    return Math.max(0, 1 - d / 100)
+  }, [customer])
 
-    setItems((list) => {
-      const existing = list.find((i) => i.key === key)
-      if (existing) {
-        const nextQty = Math.min(stock, existing.quantity + quantity)
-        return list.map((i) =>
-          i.key === key ? { ...i, quantity: nextQty } : i,
-        )
-      }
-      return [
-        ...list,
-        {
-          key,
-          productId: product.id,
-          productName: product.name,
-          variantId: variant?.id || null,
-          variantLabel,
-          sku,
-          imageUrl: product.images?.[0]?.url || null,
-          price,
-          quantity: Math.min(stock, quantity),
-          stock,
-        },
-      ]
-    })
-  }, [])
+  const addItem = useCallback(
+    (product, variant, quantity = 1) => {
+      const key = variant ? `${product.id}__${variant.id}` : `${product.id}__root`
+      const basePrice = Number(product.salePrice) || 0
+      const price = basePrice * priceFactor
+      const variantLabel = variant?.label || '—'
+      const sku = variant?.sku || product.sku || ''
+      const stock = variant ? Number(variant.stock) || 0 : Number(product.initialStock) || 0
+
+      setItems((list) => {
+        const existing = list.find((i) => i.key === key)
+        if (existing) {
+          const nextQty = Math.min(stock, existing.quantity + quantity)
+          return list.map((i) =>
+            i.key === key ? { ...i, quantity: nextQty, price } : i,
+          )
+        }
+        return [
+          ...list,
+          {
+            key,
+            productId: product.id,
+            productName: product.name,
+            variantId: variant?.id || null,
+            variantLabel,
+            sku,
+            imageUrl: product.images?.[0]?.url || null,
+            basePrice,
+            price,
+            quantity: Math.min(stock, quantity),
+            stock,
+          },
+        ]
+      })
+    },
+    [priceFactor],
+  )
+
+  // Recalcular precios cuando cambia el cliente (mayorista ↔ regular)
+  useEffect(() => {
+    setItems((list) =>
+      list.map((i) => ({ ...i, price: (i.basePrice || 0) * priceFactor })),
+    )
+  }, [priceFactor])
 
   const updateQuantity = useCallback((key, quantity) => {
     setItems((list) =>
@@ -64,45 +79,43 @@ export function CartProvider({ children }) {
   const clear = useCallback(() => {
     setItems([])
     setCustomer(null)
-    setDiscount(null)
+    setManualDiscount(null)
     setNote('')
   }, [])
 
-  // -------------------------------------------------------------
-  // Totales (sin impuestos por ahora — se conectará después)
-  // -------------------------------------------------------------
+  // Totales
   const totals = useMemo(() => {
-    const subtotal = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
-    let discountAmount = 0
+    const subtotal = items.reduce((acc, i) => acc + (i.basePrice || 0) * i.quantity, 0)
+    const discounted = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
 
-    // Descuento global
-    if (discount?.scope === 'cart') {
-      discountAmount = discount.type === 'percent'
-        ? (subtotal * Number(discount.value)) / 100
-        : Number(discount.value) || 0
-    }
-    // Descuento por item
-    else if (discount?.scope === 'item' && discount.itemId) {
-      const item = items.find((i) => i.key === discount.itemId)
-      if (item) {
-        const itemSubtotal = item.price * item.quantity
-        discountAmount = discount.type === 'percent'
-          ? (itemSubtotal * Number(discount.value)) / 100
-          : Number(discount.value) || 0
-      }
+    // Descuento total (incluye el del mayorista)
+    const wholesaleDiscountAmount = subtotal - discounted
+
+    // Descuento manual adicional (opcional, si algún día lo agregas)
+    let extraDiscount = 0
+    if (manualDiscount?.scope === 'cart') {
+      extraDiscount = manualDiscount.type === 'percent'
+        ? (discounted * Number(manualDiscount.value)) / 100
+        : Number(manualDiscount.value) || 0
     }
 
-    const taxableBase = Math.max(0, subtotal - discountAmount)
-    const tax = 0 // 🚧 conectar cuando tengas IVA configurado
-    const total = taxableBase + tax
+    const total = Math.max(0, discounted - extraDiscount)
+    const tax = 0 // 🚧 conectar con IVA cuando aplique
 
-    return { subtotal, discountAmount, tax, total }
-  }, [items, discount])
+    return {
+      subtotal,
+      wholesaleDiscountAmount,
+      discountAmount: wholesaleDiscountAmount + extraDiscount,
+      extraDiscount,
+      tax,
+      total,
+    }
+  }, [items, manualDiscount])
 
   const value = {
     items,
     customer,
-    discount,
+    discount: manualDiscount,
     note,
     totals,
     addItem,
@@ -110,15 +123,11 @@ export function CartProvider({ children }) {
     removeItem,
     clear,
     setCustomer,
-    setDiscount,
+    setDiscount: setManualDiscount,
     setNote,
   }
 
-  return (
-    <CartContext.Provider value={value}>
-      {children}
-    </CartContext.Provider>
-  )
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>
 }
 
 export function useCart() {

@@ -19,14 +19,11 @@ import { useProducts } from '../context/ProductsContext'
 const fmtCurrency = (n) =>
   `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`
 
-/**
- * Filtra ventas por periodo.
- */
 function inPeriod(sale, period, customFrom, customTo) {
   const now = new Date()
   const d = new Date(sale.createdAt)
 
-  if (period === 'today')      return d.toDateString() === now.toDateString()
+  if (period === 'today') return d.toDateString() === now.toDateString()
   if (period === 'yesterday') {
     const y = new Date(now)
     y.setDate(y.getDate() - 1)
@@ -83,6 +80,9 @@ export default function SalesHistory() {
     if (viewParams?.cashId) {
       setSearch(viewParams.cashId)
     }
+    if (viewParams?.wholesaleId) {
+      setSearch(viewParams.wholesaleName || '')
+    }
   }, [viewParams])
 
   useEffect(() => {
@@ -91,19 +91,15 @@ export default function SalesHistory() {
     return () => clearTimeout(t)
   }, [])
 
-  // 1) Filtra + ordena
   const filtered = useMemo(() => {
     let list = [...sales]
 
-    // Periodo
     list = list.filter((s) => inPeriod(s, period, customFrom, customTo))
 
-    // Chip rápido
     if (quickFilter !== 'all') {
       list = list.filter((s) => s.status === quickFilter)
     }
 
-    // Búsqueda
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((s) => {
@@ -111,6 +107,7 @@ export default function SalesHistory() {
         const customer = (s.customerName || '').toLowerCase()
         const cashier = (s.cashier || '').toLowerCase()
         const ticket = `tkt-${folio.replace('vta-', '')}`
+        const wholesaleName = (s.wholesaleSnapshot?.name || '').toLowerCase()
         const itemsText = (s.items || [])
           .map((i) => `${i.productName || ''} ${i.sku || ''}`)
           .join(' ')
@@ -121,12 +118,12 @@ export default function SalesHistory() {
           customer.includes(q) ||
           cashier.includes(q) ||
           ticket.includes(q) ||
+          wholesaleName.includes(q) ||
           itemsText.includes(q)
         )
       })
     }
 
-    // Orden
     const dir = sort.direction === 'asc' ? 1 : -1
     list.sort((a, b) => {
       const va = a[sort.field] ?? ''
@@ -141,13 +138,11 @@ export default function SalesHistory() {
   const total = filtered.length
   const filtersActive = quickFilter !== 'all'
 
-  // Paginación
   const paged = useMemo(() => {
     const start = (page - 1) * perPage
     return filtered.slice(start, start + perPage)
   }, [filtered, page, perPage])
 
-  // Stats
   const stats = useMemo(() => {
     const count = filtered.length
     const gross = filtered.reduce((acc, s) => acc + (Number(s.total) || 0), 0)
@@ -167,7 +162,6 @@ export default function SalesHistory() {
     }
   }, [filtered])
 
-  // Datos de la gráfica
   const chartData = useMemo(() => {
     const map = new Map()
     filtered.forEach((s) => {
@@ -182,7 +176,6 @@ export default function SalesHistory() {
     return Array.from(map.values()).reverse()
   }, [filtered])
 
-  // Conteos para chips rápidos
   const quickCounts = useMemo(() => {
     const counts = {
       all: sales.length,
@@ -198,7 +191,6 @@ export default function SalesHistory() {
     return counts
   }, [sales])
 
-  // Handlers
   const handleNavigate = (key) => navigate(key)
   const handleSortChange = (field, direction) => setSort({ field, direction })
 
@@ -289,7 +281,6 @@ export default function SalesHistory() {
       period={undefined}
       onPeriodChange={undefined}
     >
-      {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm mb-5">
         <button
           onClick={goToNewSale}
@@ -347,7 +338,6 @@ export default function SalesHistory() {
         onPrintTickets={() => console.log('Imprimir tickets seleccionados')}
       />
 
-      {/* Tabla en desktop, tarjetas en móvil */}
       <div className="hidden md:block">
         <SalesHistoryTable
           sales={paged}
@@ -388,7 +378,6 @@ export default function SalesHistory() {
         />
       </div>
 
-      {/* Modal de cancelación */}
       <SalesHistoryCancelModal
         open={!!cancelSale}
         sale={cancelSale}

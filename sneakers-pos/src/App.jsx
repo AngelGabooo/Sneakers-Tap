@@ -14,6 +14,12 @@ import Pos from './pages/Pos'
 import SaleDetail from './pages/SaleDetail'
 import SalesHistory from './pages/SalesHistory'
 import CashOpen from './pages/CashOpen'
+import CashCurrent from './pages/CashCurrent'
+import CashClose from './pages/CashClose'
+import CashHistory from './pages/CashHistory'
+import Wholesale from './pages/Wholesale'
+import WholesaleDetail from './pages/WholesaleDetail'
+import WholesaleNew from './pages/WholesaleNew'
 
 const VIEWS = {
   dashboard:              Dashboard,
@@ -29,6 +35,13 @@ const VIEWS = {
   'sale-detail':          SaleDetail,
   'sales-history':        SalesHistory,
   'cash-open':            CashOpen,
+  'cash-current':         CashCurrent,
+  'cash-close':           CashClose, 
+  'cash-history':         CashHistory,
+  'wholesale':            Wholesale,
+  'wholesale-new':        WholesaleNew,
+  'wholesale-edit':       WholesaleDetail,
+
 }
 
 export default function App() {

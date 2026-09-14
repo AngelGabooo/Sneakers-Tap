@@ -6,9 +6,10 @@ import { AuthProvider } from './context/AuthContext.jsx'
 import { ViewProvider } from './context/ViewContext.jsx'
 import { ProductsProvider } from './context/ProductsContext.jsx'
 import { MovementsProvider } from './context/MovementsContext.jsx'
+import { CashProvider } from './context/CashContext.jsx'
 import { CartProvider } from './context/CartContext.jsx'
 import { SalesProvider } from './context/SalesContext.jsx'
-import { CashProvider } from './context/CashContext.jsx'
+import { WholesaleProvider } from './context/WholesaleContext.jsx'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -21,7 +22,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               <CashProvider>
                 <CartProvider>
                   <SalesProvider>
-                    <App />
+                    <WholesaleProvider>
+                      <App />
+                    </WholesaleProvider>
                   </SalesProvider>
                 </CartProvider>
               </CashProvider>

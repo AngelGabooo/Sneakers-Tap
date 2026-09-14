@@ -1,6 +1,7 @@
 import { ShoppingCart, UserPlus, User, Percent, StickyNote, Trash2, Save, X } from 'lucide-react'
 import Button from '../common/Button'
 import Card from '../common/Card'
+import Badge from '../common/Badge'
 import PosCartItem from './PosCartItem'
 import PosEmptyCart from './PosEmptyCart'
 
@@ -74,12 +75,19 @@ export default function PosCart({
               {customer.name?.[0]?.toUpperCase() || '?'}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-brand-black dark:text-dark-text truncate">
-                {customer.name}
-              </p>
-              {customer.isWholesale && (
-                <p className="text-[11px] text-brand-blue">
-                  Mayorista {customer.level && `· ${customer.level}`}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-xs font-medium text-brand-black dark:text-dark-text truncate">
+                  {customer.name}
+                </p>
+                {customer.isWholesale && (
+                  <Badge variant="info">
+                    Mayorista · {customer.defaultDiscount ? `${customer.defaultDiscount}%` : 'sin dto.'}
+                  </Badge>
+                )}
+              </div>
+              {customer.isWholesale && customer.minPurchaseAmount > 0 && (
+                <p className="text-[10px] text-gray-500 dark:text-dark-muted">
+                  Compra mínima: ${customer.minPurchaseAmount.toLocaleString('es-MX')}
                 </p>
               )}
             </div>
@@ -141,9 +149,19 @@ export default function PosCart({
           <div className="border-t border-gray-100 dark:border-dark-border p-4 space-y-3 shrink-0 bg-white dark:bg-dark-card">
             <div className="space-y-1.5">
               <Row label="Subtotal" value={totals.subtotal} />
-              {totals.discountAmount > 0 && (
-                <Row label="Descuento" value={-totals.discountAmount} tone="danger" />
+
+              {totals.wholesaleDiscountAmount > 0 && (
+                <Row
+                  label={`Descuento ${customer?.isWholesale ? 'mayorista' : ''}`}
+                  value={-totals.wholesaleDiscountAmount}
+                  tone="info"
+                />
               )}
+
+              {totals.extraDiscount > 0 && (
+                <Row label="Descuento adicional" value={-totals.extraDiscount} tone="danger" />
+              )}
+
               {totals.tax > 0 && <Row label="Impuestos" value={totals.tax} />}
             </div>
 
@@ -172,10 +190,15 @@ export default function PosCart({
 }
 
 function Row({ label, value, tone = 'neutral' }) {
+  const tones = {
+    neutral: 'text-brand-black dark:text-dark-text',
+    info:    'text-brand-blue',
+    danger:  'text-brand-red',
+  }
   return (
     <div className="flex items-center justify-between text-sm">
       <span className="text-gray-500 dark:text-dark-muted">{label}</span>
-      <span className={`font-medium ${tone === 'danger' ? 'text-brand-red' : 'text-brand-black dark:text-dark-text'}`}>
+      <span className={`font-medium ${tones[tone]}`}>
         {value < 0 ? '-' : ''}${Math.abs(value).toLocaleString('es-MX')}
       </span>
     </div>
