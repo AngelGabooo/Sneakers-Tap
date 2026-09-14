@@ -1,53 +1,74 @@
+// src/components/pos/PosTicketModal.jsx
 import { useEffect, useRef, useState } from 'react'
 import { Printer, X, Download, Mail, Loader2 } from 'lucide-react'
 import Button from '../common/Button'
 import { printReceipt } from '../../services/printerService'
-
-const STORE = {
-  name: 'SNEAKERS',
-  tagline: 'Tenis · Bolsas · Mochilas · Accesorios',
-  address: 'Av. Principal 123, Col. Centro',
-  city: 'Ciudad de México, CDMX',
-  phone: '+52 55 1234 5678',
-  rfc: 'SNK240101ABC',
-}
+import { useSettings } from '../../context/SettingsContext'
 
 export default function PosTicketModal({
   open,
   sale,
-  width = 58,
+  width,
   onClose,
   onSendEmail,
 }) {
-  const [paperWidth, setPaperWidth] = useState(width)
+  const { settings } = useSettings()
+  const { store, ticket } = settings
+
+  // Ancho por defecto: el configurado en #32, o el prop, o 80
+  const defaultWidth = width || ticket.width || 80
+  const [paperWidth, setPaperWidth] = useState(defaultWidth)
   const [printing, setPrinting] = useState(false)
   const printRef = useRef(null)
 
   useEffect(() => {
-    if (open) setPaperWidth(width)
-  }, [open, width])
+    if (open) setPaperWidth(width || ticket.width || 80)
+  }, [open, width, ticket.width])
 
   if (!open || !sale) return null
 
   // -----------------------------------------------------------
-  // Imprimir: intenta por backend primero, si falla cae al navegador
+  // Datos de la tienda (con fallbacks para que nunca se vea vacío)
+  // -----------------------------------------------------------
+  const storeName = ticket.header.name || store.commercialName || 'SNEAKERS'
+  const storeTagline = ticket.header.tagline || ''
+  const showLogo = ticket.header.showLogo && store.logoUrl
+  const showAddress = ticket.header.showAddress && store.address?.street
+  const showPhone = ticket.header.showPhone && store.phone
+  const showEmail = ticket.header.showEmail && store.email
+  const showRfc = ticket.header.showRfc && store.rfc
+
+  const addressLine = [
+    store.address?.street,
+    store.address?.exteriorNumber,
+  ].filter(Boolean).join(' ')
+
+  const cityLine = [
+    store.address?.neighborhood,
+    store.address?.city,
+    store.address?.state,
+  ].filter(Boolean).join(', ')
+
+  const postalLine = [
+    store.address?.postalCode,
+    store.address?.country,
+  ].filter(Boolean).join(' · ')
+
+  // -----------------------------------------------------------
+  // Imprimir
   // -----------------------------------------------------------
   const handlePrint = async () => {
     setPrinting(true)
-
     try {
       const result = await printReceipt(sale)
       if (result.ok) {
-        console.log('✅ Ticket impreso por backend')
         setPrinting(false)
         return
       }
-      console.warn('⚠️ Backend no disponible, usando window.print():', result.error)
     } catch (err) {
-      console.warn('⚠️ Error con backend, usando window.print():', err)
+      console.warn('Backend no disponible, usando window.print()')
     }
 
-    // Fallback: navegador
     const content = printRef.current?.innerHTML
     if (content) {
       const printWindow = window.open('', '_blank', 'width=400,height=800')
@@ -58,32 +79,23 @@ export default function PosTicketModal({
             <style>
               @page { size: ${paperWidth}mm auto; margin: 3mm; }
               * { box-sizing: border-box; }
-              html, body {
-                background: #fff !important;
-                color: #000 !important;
-              }
+              html, body { background: #fff !important; color: #000 !important; }
               body {
                 font-family: 'Courier New', ui-monospace, monospace;
                 font-size: ${paperWidth === 58 ? '10px' : '12px'};
-                margin: 0;
-                padding: 0;
-                width: ${paperWidth}mm;
-                line-height: 1.35;
+                margin: 0; padding: 0; width: ${paperWidth}mm; line-height: 1.35;
               }
               .ticket { padding: 2mm 1mm; color: #000; }
               @media print { body { width: ${paperWidth}mm; } }
             </style>
           </head>
-          <body>
-            <div class="ticket">${content}</div>
-          </body>
+          <body><div class="ticket">${content}</div></body>
         </html>
       `)
       printWindow.document.close()
       printWindow.focus()
       setTimeout(() => printWindow.print(), 350)
     }
-
     setPrinting(false)
   }
 
@@ -109,6 +121,7 @@ export default function PosTicketModal({
       margin: '0 auto',
     },
     header: { textAlign: 'center', marginBottom: '3mm' },
+    logoImg: { maxHeight: '14mm', maxWidth: '80%', margin: '0 auto 2mm', display: 'block' },
     logo: { fontSize: '1.6em', fontWeight: 800, letterSpacing: '1px', color: '#000' },
     tagline: { fontSize: '0.9em', marginTop: '1mm', color: '#000' },
     small: { fontSize: '0.85em', marginTop: '2mm', color: '#000' },
@@ -121,18 +134,13 @@ export default function PosTicketModal({
     itemName: { fontWeight: 700, color: '#000' },
     itemMeta: { fontSize: '0.9em', color: '#000' },
     itemLine: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      fontSize: '0.95em',
-      color: '#000',
+      display: 'flex', justifyContent: 'space-between',
+      fontSize: '0.95em', color: '#000',
     },
     totalsRow: { display: 'flex', justifyContent: 'space-between', color: '#000' },
     totalLine: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      fontSize: '1.4em',
-      fontWeight: 700,
-      color: '#000',
+      display: 'flex', justifyContent: 'space-between',
+      fontSize: '1.4em', fontWeight: 700, color: '#000',
     },
     footer: { textAlign: 'center', fontSize: '0.9em', marginTop: '3mm', color: '#000' },
   }
@@ -183,50 +191,105 @@ export default function PosTicketModal({
         {/* Preview */}
         <div className="flex-1 overflow-y-auto p-4 bg-gray-100 dark:bg-dark-surface flex justify-center">
           <div ref={printRef} style={ticketStyles.container}>
+            {/* Header desde #32 */}
             <div style={ticketStyles.header}>
-              <div style={ticketStyles.logo}>{STORE.name}</div>
-              <div style={ticketStyles.tagline}>{STORE.tagline}</div>
-              <div style={ticketStyles.small}>{STORE.address}</div>
-              <div style={ticketStyles.smallLine}>{STORE.city}</div>
-              <div style={ticketStyles.smallLine}>Tel: {STORE.phone}</div>
-              <div style={ticketStyles.smallLine}>RFC: {STORE.rfc}</div>
+              {showLogo && (
+                <img src={store.logoUrl} alt="Logo" style={ticketStyles.logoImg} />
+              )}
+              <div style={ticketStyles.logo}>{storeName}</div>
+              {storeTagline && (
+                <div style={ticketStyles.tagline}>{storeTagline}</div>
+              )}
+              {showAddress && (
+                <div style={ticketStyles.small}>
+                  {addressLine && <div>{addressLine}</div>}
+                  {cityLine && <div style={ticketStyles.smallLine}>{cityLine}</div>}
+                  {postalLine && <div style={ticketStyles.smallLine}>{postalLine}</div>}
+                </div>
+              )}
+              {showPhone && (
+                <div style={ticketStyles.smallLine}>Tel: {store.phone}</div>
+              )}
+              {showEmail && (
+                <div style={ticketStyles.smallLine}>{store.email}</div>
+              )}
+              {showRfc && (
+                <div style={ticketStyles.smallLine}>RFC: {store.rfc}</div>
+              )}
             </div>
 
             <div style={ticketStyles.divider} />
 
+            {/* Meta de venta */}
             <div style={ticketStyles.meta}>
-              <div style={ticketStyles.metaRow}>
-                <span>Ticket:</span>
-                <span style={ticketStyles.bold}>{sale.folio}</span>
-              </div>
-              <div style={ticketStyles.metaRow}>
-                <span>Fecha:</span>
-                <span>{new Date(sale.createdAt).toLocaleString('es-MX')}</span>
-              </div>
-              <div style={ticketStyles.metaRow}>
-                <span>Cajero:</span>
-                <span>{sale.cashier}</span>
-              </div>
-              <div style={ticketStyles.metaRow}>
-                <span>Cliente:</span>
-                <span>{sale.customerName || 'Venta general'}</span>
-              </div>
+              {ticket.sale.showNumber && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Ticket:</span>
+                  <span style={ticketStyles.bold}>{sale.folio}</span>
+                </div>
+              )}
+              {ticket.sale.showDate && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Fecha:</span>
+                  <span>{new Date(sale.createdAt).toLocaleString('es-MX')}</span>
+                </div>
+              )}
+              {ticket.sale.showSeller && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Vendedor:</span>
+                  <span>{sale.cashier}</span>
+                </div>
+              )}
+              {ticket.sale.showCustomer && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Cliente:</span>
+                  <span>{sale.customerName || 'Venta general'}</span>
+                </div>
+              )}
+              {ticket.sale.showCash && sale.cashLabel && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Caja:</span>
+                  <span>{sale.cashLabel}</span>
+                </div>
+              )}
+              {ticket.sale.showBranch && sale.branch && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Sucursal:</span>
+                  <span>{sale.branch}</span>
+                </div>
+              )}
             </div>
 
             <div style={ticketStyles.divider} />
 
+            {/* Productos */}
             <div>
               {(sale.items || []).map((item, i) => (
                 <div key={i} style={ticketStyles.itemBlock}>
-                  <div style={ticketStyles.itemName}>{item.productName}</div>
+                  {ticket.products.showName && (
+                    <div style={ticketStyles.itemName}>{item.productName}</div>
+                  )}
                   <div style={ticketStyles.itemMeta}>
-                    {item.variantLabel} · {item.sku}
+                    {[
+                      ticket.products.showSize ? item.size : null,
+                      ticket.products.showColor ? item.color : null,
+                    ].filter(Boolean).join(' · ')}
                   </div>
+                  {ticket.products.showSku && item.sku && (
+                    <div style={ticketStyles.itemMeta}>SKU: {item.sku}</div>
+                  )}
                   <div style={ticketStyles.itemLine}>
-                    <span>{item.quantity} × ${Number(item.price).toLocaleString('es-MX')}</span>
-                    <span style={ticketStyles.bold}>
-                      ${(item.quantity * item.price).toLocaleString('es-MX')}
+                    <span>
+                      {ticket.products.showQuantity ? `${item.quantity} × ` : ''}
+                      {ticket.products.showUnitPrice
+                        ? `$${Number(item.price).toLocaleString('es-MX')}`
+                        : ''}
                     </span>
+                    {ticket.products.showSubtotal && (
+                      <span style={ticketStyles.bold}>
+                        ${(item.quantity * item.price).toLocaleString('es-MX')}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -234,12 +297,13 @@ export default function PosTicketModal({
 
             <div style={ticketStyles.divider} />
 
+            {/* Totales */}
             <div>
               <TicketRow style={ticketStyles.totalsRow} label="Subtotal" value={sale.totals.subtotal} />
-              {sale.totals.discountAmount > 0 && (
+              {ticket.products.showDiscount && sale.totals.discountAmount > 0 && (
                 <TicketRow style={ticketStyles.totalsRow} label="Descuento" value={-sale.totals.discountAmount} />
               )}
-              {sale.totals.tax > 0 && (
+              {ticket.products.showTax && sale.totals.tax > 0 && (
                 <TicketRow style={ticketStyles.totalsRow} label="Impuestos" value={sale.totals.tax} />
               )}
             </div>
@@ -254,7 +318,9 @@ export default function PosTicketModal({
             <div style={ticketStyles.divider} />
 
             <div style={ticketStyles.meta}>
-              <TicketRow style={ticketStyles.totalsRow} label="Método" value={methodLabel} currency={false} />
+              {ticket.sale.showPaymentMethod && (
+                <TicketRow style={ticketStyles.totalsRow} label="Método" value={methodLabel} currency={false} />
+              )}
               {sale.payment?.method === 'cash' && (
                 <>
                   <TicketRow style={ticketStyles.totalsRow} label="Recibido" value={sale.payment.cashReceived} />
@@ -273,17 +339,43 @@ export default function PosTicketModal({
 
             <div style={ticketStyles.divider} />
 
+            {/* Footer desde #32 */}
             <div style={ticketStyles.footer}>
-              <div style={{ ...ticketStyles.bold, marginBottom: '1mm' }}>
-                ¡Gracias por tu compra!
-              </div>
-              <div>Conserva tu ticket para cambios y devoluciones.</div>
-              <div style={{ marginTop: '1mm' }}>*** {STORE.name} ***</div>
+              {ticket.footer.showThankYou && ticket.footer.thankYouMessage && (
+                <div style={{ ...ticketStyles.bold, marginBottom: '1mm' }}>
+                  {ticket.footer.thankYouMessage}
+                </div>
+              )}
+              {ticket.footer.showReturnPolicy && ticket.footer.returnPolicy && (
+                <div>{ticket.footer.returnPolicy}</div>
+              )}
+              {ticket.footer.showWebsite && store.website && (
+                <div style={{ marginTop: '1mm' }}>{store.website}</div>
+              )}
+              {ticket.footer.showSocial && (
+                <div style={{ marginTop: '1mm', fontSize: '0.85em' }}>
+                  {store.contact?.instagram && <div>{store.contact.instagram}</div>}
+                  {store.contact?.facebook && <div>{store.contact.facebook}</div>}
+                  {store.contact?.whatsapp && <div>WhatsApp: {store.contact.whatsapp}</div>}
+                </div>
+              )}
+              {ticket.footer.showQr && ticket.qr.enabled && ticket.qr.url && (
+                <div style={{ marginTop: '2mm', textAlign: 'center' }}>
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(ticket.qr.url)}`}
+                    alt="QR"
+                    style={{ width: '20mm', height: '20mm' }}
+                  />
+                </div>
+              )}
+              {!ticket.footer.showThankYou && !ticket.footer.showReturnPolicy && (
+                <div style={ticketStyles.bold}>*** {storeName} ***</div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer del modal */}
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100 dark:border-dark-border shrink-0 flex-wrap">
           <Button variant="secondary" icon={Mail} onClick={() => onSendEmail?.(sale)}>
             Enviar

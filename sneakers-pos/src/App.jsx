@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useAuth } from './context/AuthContext'
 import { useView } from './context/ViewContext'
 import Login from './pages/Login'
@@ -20,6 +21,16 @@ import CashHistory from './pages/CashHistory'
 import Wholesale from './pages/Wholesale'
 import WholesaleDetail from './pages/WholesaleDetail'
 import WholesaleNew from './pages/WholesaleNew'
+import Users from './pages/Users'
+import UserCreate from './pages/UserCreate'
+import UserActivity from './pages/UserActivity'      // 👈 NUEVO
+import UserSessions from './pages/UserSessions'      // 👈 NUEVO
+import Roles from './pages/Roles'
+import RoleEditor from './pages/RoleEditor'
+import Reports from './pages/Reports'
+import ReportDetail from './pages/ReportDetail'
+import Audit from './pages/Audit'
+import Settings from './pages/Settings'
 
 const VIEWS = {
   dashboard:              Dashboard,
@@ -36,12 +47,22 @@ const VIEWS = {
   'sales-history':        SalesHistory,
   'cash-open':            CashOpen,
   'cash-current':         CashCurrent,
-  'cash-close':           CashClose, 
+  'cash-close':           CashClose,
   'cash-history':         CashHistory,
-  'wholesale':            Wholesale,
+  wholesale:              Wholesale,
   'wholesale-new':        WholesaleNew,
   'wholesale-edit':       WholesaleDetail,
-
+  users:                  Users,
+  'user-new':             UserCreate,
+  'user-activity':        UserActivity,   // 👈 NUEVO
+  'user-sessions':        UserSessions,   // 👈 NUEVO
+  roles:                  Roles,
+  'role-new':             RoleEditor,
+  'role-edit':            RoleEditor,
+  reports:                Reports,
+  'report-detail':        ReportDetail,
+  audit:                  Audit,
+  settings:               Settings,
 }
 
 export default function App() {

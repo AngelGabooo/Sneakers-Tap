@@ -51,20 +51,18 @@ const NAV_SECTIONS = [
   {
     label: 'Operación',
     items: [
-      { key: 'customers',  label: 'Clientes',           icon: Users },
       { key: 'wholesale',  label: 'Clientes mayoristas', icon: UserCog },
     ],
   },
   {
-    label: 'Administración',
-    items: [
-      { key: 'users',   label: 'Usuarios y empleados', icon: Users },
-      { key: 'roles',   label: 'Roles y permisos',     icon: ShieldCheck },
-      { key: 'reports', label: 'Reportes',             icon: BarChart3 },
-      { key: 'alerts',  label: 'Alertas',              icon: Bell },
-      { key: 'audit',   label: 'Historial y auditoría', icon: History },
-    ],
-  },
+  label: 'Administración',
+  items: [
+    { key: 'users',   label: 'Usuarios y empleados', icon: Users },
+    { key: 'roles',   label: 'Roles y permisos',     icon: ShieldCheck },
+    { key: 'reports', label: 'Reportes',             icon: BarChart3 },
+    { key: 'audit',   label: 'Historial y auditoría', icon: History },
+  ],
+},
   {
     label: 'Sistema',
     items: [
