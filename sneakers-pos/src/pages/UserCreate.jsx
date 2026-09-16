@@ -1,5 +1,5 @@
 // src/pages/UserCreate.jsx
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Toast from '../components/common/Toast'
 import UserCreateHeader from '../components/users/UserCreateHeader'
@@ -7,7 +7,9 @@ import UserCreateForm from '../components/users/UserCreateForm'
 import { useView } from '../context/ViewContext'
 import { useUsers } from '../context/UsersContext'
 import { useAuth } from '../context/AuthContext'
+import { useRoles } from '../context/RolesContext'
 import { evaluatePassword } from '../components/users/UserPasswordStrength'
+import { supabase } from '../lib/supabase'
 
 const INITIAL_FORM = {
   fullName: '',
@@ -24,12 +26,27 @@ const INITIAL_FORM = {
 export default function UserCreate() {
   const { navigate } = useView()
   const { user: currentUser } = useAuth()
-  const { createUser, getUserByEmail, logActivity } = useUsers()
+  const { createUser, getUserByEmail } = useUsers()
+  const { roles } = useRoles()
 
   const [form, setForm] = useState(INITIAL_FORM)
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState(null)
+  const [branchId, setBranchId] = useState(null)
+
+  // Cargar la sucursal principal
+  useEffect(() => {
+    async function loadBranch() {
+      const { data } = await supabase
+        .from('branches')
+        .select('id, name')
+        .limit(1)
+        .maybeSingle()
+      if (data) setBranchId(data.id)
+    }
+    loadBranch()
+  }, [])
 
   const handleChange = useCallback((field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -88,36 +105,30 @@ export default function UserCreate() {
 
     setSubmitting(true)
     try {
-      const payload = {
-        fullName: form.fullName.trim(),
-        phone: form.phone.trim(),
+      // Buscar el role_id por nombre
+      const roleObj = roles.find((r) => r.name === form.role)
+
+      const created = await createUser({
         email: form.email.trim().toLowerCase(),
         password: form.password,
-        role: form.role,
-        branch: form.branch,
+        fullName: form.fullName.trim(),
+        phone: form.phone.trim(),
+        roleId: roleObj?.id || null,
+        branchId: branchId,
         status: form.status,
-        createdBy: currentUser?.name || 'Sistema',
-      }
-
-      const created = createUser(payload)
-
-      logActivity(created.id, {
-        type: 'create',
-        label: `Usuario creado por ${currentUser?.name || 'Sistema'}`,
-        by: currentUser?.name || 'Sistema',
       })
 
       setToast({
         title: 'Usuario creado correctamente',
-        description: `${created.fullName} fue registrado con ID ${created.employeeId}.`,
+        description: `${created.fullName} fue registrado con ID ${created.employeeId || '—'}.`,
       })
 
-      setTimeout(() => navigate('users'), 900)
+      setTimeout(() => navigate('users'), 1200)
     } catch (err) {
-      console.error('[UserCreate] Error al guardar', err)
+      console.error('[UserCreate] Error:', err)
       setErrors((prev) => ({
         ...prev,
-        form: 'No fue posible crear el empleado. Intenta de nuevo.',
+        form: err.message || 'No fue posible crear el empleado. Intenta de nuevo.',
       }))
     } finally {
       setSubmitting(false)

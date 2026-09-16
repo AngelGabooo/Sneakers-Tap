@@ -6,7 +6,6 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 serve(async (req) => {
   try {
-    // Verificar que quien llama sea admin
     const authHeader = req.headers.get('Authorization') || ''
     const token = authHeader.replace('Bearer ', '')
 
@@ -23,12 +22,11 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Email y password obligatorios' }), { status: 400 })
     }
 
-    // Crear usuario con service_role
     const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY)
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true,   // ✅ Confirmar sin requerir email
+      email_confirm: true,
       user_metadata: metadata || {},
     })
 

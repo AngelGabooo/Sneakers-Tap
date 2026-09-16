@@ -1,9 +1,6 @@
 // src/services/authService.js
 import { supabase } from '../lib/supabase'
 
-/**
- * Servicio de autenticación con Supabase Auth.
- */
 export const authService = {
   /**
    * Inicia sesión con email y contraseña.
@@ -28,6 +25,46 @@ export const authService = {
   },
 
   /**
+   * Registra un usuario nuevo.
+   * ⚠️ Nota: en Supabase Auth, signUp() inicia sesión automáticamente.
+   * Para crear usuarios SIN cambiar la sesión actual, usar `signUpAdmin` con Admin API.
+   */
+  async signUp({ email, password, metadata = {} }) {
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: {
+        data: metadata,
+        emailRedirectTo: `${window.location.origin}/`,
+      },
+    })
+
+    if (error) throw error
+    return data
+  },
+
+  /**
+   * Crea un usuario desde el panel de admin SIN cerrar la sesión actual.
+   * Usa una Edge Function con service_role para crear usuarios.
+   *
+   * ⚠️ Requiere que exista la Edge Function `create-user` deployada.
+   */
+  async signUpAdmin({ email, password, metadata = {} }) {
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: {
+        email: email.trim().toLowerCase(),
+        password,
+        metadata,
+      },
+    })
+
+    if (error) throw new Error(error.message || 'Error al crear usuario')
+    if (data?.error) throw new Error(data.error)
+
+    return data
+  },
+
+  /**
    * Cierra la sesión actual.
    */
   async signOut() {
@@ -36,27 +73,18 @@ export const authService = {
     return true
   },
 
-  /**
-   * Obtiene la sesión actual.
-   */
   async getSession() {
     const { data, error } = await supabase.auth.getSession()
     if (error) throw error
     return data.session
   },
 
-  /**
-   * Obtiene el usuario autenticado actual.
-   */
   async getUser() {
     const { data, error } = await supabase.auth.getUser()
     if (error) throw error
     return data.user
   },
 
-  /**
-   * Envía correo de recuperación de contraseña.
-   */
   async sendPasswordReset(email) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
@@ -66,8 +94,16 @@ export const authService = {
   },
 
   /**
-   * Suscribirse a cambios de sesión.
+   * Actualiza la contraseña del usuario autenticado.
    */
+  async updatePassword(newPassword) {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
+    if (error) throw error
+    return data
+  },
+
   onAuthStateChange(callback) {
     return supabase.auth.onAuthStateChange(callback)
   },

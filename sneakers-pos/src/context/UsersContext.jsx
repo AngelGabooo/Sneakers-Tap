@@ -1,51 +1,74 @@
 // src/context/UsersContext.jsx
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { hashPassword, isHashed } from '../utils/password'
-import { seedUsers } from '../data/seed'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { usersRepo } from '../repositories/usersRepo'
+import { useNetwork } from './NetworkContext'
 
 const UsersContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-users'
+// Claves de localStorage para lo que aún no migramos
 const SESSIONS_KEY = 'sneakers-user-sessions'
 const ACTIVITY_KEY = 'sneakers-user-activity'
 
 export function UsersProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
+  // ---------------------------------------------------------
+  // Cargar usuarios locales
+  // ---------------------------------------------------------
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setUsers(parsed)
-          return
-        }
-      }
-      // Sin usuarios → sembrar admin por defecto
-      const seeded = seedUsers()
-      setUsers(seeded)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded))
-    } catch (e) {
-      console.warn('No se pudo leer los usuarios:', e)
-    } finally {
-      setLoading(false)
+      const list = await usersRepo.getAllLocal()
+      if (mountedRef.current) setUsers(list)
+      return list
+    } catch (err) {
+      console.error('❌ Error cargando usuarios locales:', err)
+      return []
     }
   }, [])
 
-  useEffect(() => {
-    if (loading) return
+  // ---------------------------------------------------------
+  // Sync desde Supabase
+  // ---------------------------------------------------------
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(users))
-    } catch (e) {
-      console.warn('No se pudo guardar los usuarios:', e)
+      await usersRepo.syncFromSupabase()
+      await loadLocal()
+    } catch (err) {
+      console.warn('⚠️ Sync de usuarios falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [users, loading])
+  }, [isOnline, loadLocal])
 
-  /* ---------------------------------------------------------- */
-  /* Lectura                                                    */
-  /* ---------------------------------------------------------- */
+  // Al montar
+  useEffect(() => {
+    mountedRef.current = true
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+      if (isOnline) syncRemote()
+    }
+    init()
+    return () => { mountedRef.current = false }
+  }, [loadLocal, syncRemote, isOnline])
+
+  // Al reconectar
+  useEffect(() => {
+    if (!isOnline) return
+    const t = setTimeout(() => syncRemote(), 1500)
+    return () => clearTimeout(t)
+  }, [isOnline, syncRemote])
+
+  // ---------------------------------------------------------
+  // Lectura
+  // ---------------------------------------------------------
   const getUserById = useCallback(
     (id) => users.find((u) => u.id === id) || null,
     [users],
@@ -59,116 +82,64 @@ export function UsersProvider({ children }) {
     [users],
   )
 
-  /* ---------------------------------------------------------- */
-  /* Crear                                                      */
-  /* ---------------------------------------------------------- */
-  const createUser = useCallback((payload) => {
-    const now = new Date().toISOString()
-    const id = `usr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const employeeId = `EMP-${String(users.length + 1).padStart(5, '0')}`
+  // ---------------------------------------------------------
+  // Crear
+  // ---------------------------------------------------------
+  const createUser = useCallback(async (payload) => {
+    const created = await usersRepo.create(payload)
+    setUsers((list) => [created, ...list])
+    return created
+  }, [])
 
-    const record = {
-      id,
-      employeeId,
-      fullName: payload.fullName || '',
-      firstName: (payload.fullName || '').split(' ')[0] || '',
-      lastName: (payload.fullName || '').split(' ').slice(1).join(' ') || '',
-      username: payload.username || (payload.email || '').split('@')[0] || '',
-      email: (payload.email || '').toLowerCase(),
-      phone: payload.phone || '',
-      password: payload.password ? hashPassword(payload.password) : '',
-      role: payload.role || 'Vendedor',
-      branch: payload.branch || 'Tienda principal',
-      department: payload.department || '',
-      status: payload.status || 'active',
-      lastAccess: null,
-      lastAccessRelative: null,
-      createdAt: now,
-      createdBy: payload.createdBy || 'Sistema',
-      updatedAt: now,
+  // ---------------------------------------------------------
+  // Actualizar
+  // ---------------------------------------------------------
+  const updateUser = useCallback(async (id, patch) => {
+    const updated = await usersRepo.update(id, patch)
+    setUsers((list) =>
+      list.map((u) => (u.id === id ? { ...u, ...patch } : u)),
+    )
+    return updated
+  }, [])
+
+  // ---------------------------------------------------------
+  // Cambiar estado
+  // ---------------------------------------------------------
+  const changeStatus = useCallback(async (id, status) => {
+    await usersRepo.changeStatus(id, status)
+    setUsers((list) => list.map((u) => (u.id === id ? { ...u, status } : u)))
+    return true
+  }, [])
+
+  // ---------------------------------------------------------
+  // Restablecer acceso (contraseña)
+  // ---------------------------------------------------------
+  const resetAccess = useCallback(async (id, newPassword) => {
+    try {
+      const { authService } = await import('../services/authService')
+      // Nota: solo funciona para el propio usuario; para otros requiere Admin API
+      // Aquí lo dejamos como "pendiente" si es otro usuario
+      console.warn('⚠️ resetAccess: pendiente de implementar con Admin API')
+      return { ok: false, reason: 'no-implementado' }
+    } catch (err) {
+      console.error('Error resetAccess:', err)
+      return { ok: false, reason: err.message }
     }
-
-    setUsers((list) => [record, ...list])
-    return record
-  }, [users.length])
-
-  /* ---------------------------------------------------------- */
-  /* Actualizar                                                 */
-  /* ---------------------------------------------------------- */
-  const updateUser = useCallback((id, patch) => {
-    let updated = null
-    setUsers((list) =>
-      list.map((u) => {
-        if (u.id !== id) return u
-        const normalized = { ...patch }
-
-        if (normalized.email) {
-          normalized.email = normalized.email.trim().toLowerCase()
-        }
-
-        if (normalized.password && !isHashed(normalized.password)) {
-          normalized.password = hashPassword(normalized.password)
-        }
-
-        if (normalized.fullName && normalized.fullName !== u.fullName) {
-          normalized.firstName = normalized.fullName.split(' ')[0] || ''
-          normalized.lastName = normalized.fullName.split(' ').slice(1).join(' ') || ''
-        }
-
-        updated = { ...u, ...normalized, updatedAt: new Date().toISOString() }
-        return updated
-      }),
-    )
-    return updated
   }, [])
 
-  /* ---------------------------------------------------------- */
-  /* Cambiar estado                                             */
-  /* ---------------------------------------------------------- */
-  const changeStatus = useCallback((id, status) => {
-    let updated = null
-    setUsers((list) =>
-      list.map((u) => {
-        if (u.id !== id) return u
-        updated = { ...u, status, updatedAt: new Date().toISOString() }
-        return updated
-      }),
-    )
-    return updated
-  }, [])
-
-  /* ---------------------------------------------------------- */
-  /* Restablecer acceso                                         */
-  /* ---------------------------------------------------------- */
-  const resetAccess = useCallback((id, newPassword) => {
-    let updated = null
-    setUsers((list) =>
-      list.map((u) => {
-        if (u.id !== id) return u
-        updated = {
-          ...u,
-          password: hashPassword(newPassword),
-          mustChangePassword: true,
-          updatedAt: new Date().toISOString(),
-        }
-        return updated
-      }),
-    )
-    return updated
-  }, [])
-
-  /* ---------------------------------------------------------- */
-  /* Eliminar                                                   */
-  /* ---------------------------------------------------------- */
-  const deleteUser = useCallback((id) => {
+  // ---------------------------------------------------------
+  // Eliminar
+  // ---------------------------------------------------------
+  const deleteUser = useCallback(async (id) => {
+    await usersRepo.delete(id)
     setUsers((list) => list.filter((u) => u.id !== id))
   }, [])
 
   const clearAll = useCallback(() => setUsers([]), [])
 
-  /* ---------------------------------------------------------- */
-  /* Sesiones                                                   */
-  /* ---------------------------------------------------------- */
+  // ---------------------------------------------------------
+  // Sesiones (SIGUE EN LOCALSTORAGE POR AHORA)
+  // ---------------------------------------------------------
   const getUserSessions = useCallback((userId) => {
     try {
       const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}')
@@ -190,9 +161,9 @@ export function UsersProvider({ children }) {
     } catch { return false }
   }, [])
 
-  /* ---------------------------------------------------------- */
-  /* Actividad                                                  */
-  /* ---------------------------------------------------------- */
+  // ---------------------------------------------------------
+  // Actividad (SIGUE EN LOCALSTORAGE POR AHORA)
+  // ---------------------------------------------------------
   const getUserActivity = useCallback((userId) => {
     try {
       const all = JSON.parse(localStorage.getItem(ACTIVITY_KEY) || '{}')
@@ -216,9 +187,21 @@ export function UsersProvider({ children }) {
     }
   }, [])
 
+  // ---------------------------------------------------------
+  // Refresh manual
+  // ---------------------------------------------------------
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
+
+  // ---------------------------------------------------------
+  // Value expuesto
+  // ---------------------------------------------------------
   const value = {
     users,
     loading,
+    syncing,
     getUserById,
     getUserByEmail,
     createUser,
@@ -231,6 +214,7 @@ export function UsersProvider({ children }) {
     closeRemoteSession,
     getUserActivity,
     logActivity,
+    refresh,
   }
 
   return <UsersContext.Provider value={value}>{children}</UsersContext.Provider>
