@@ -1,3 +1,4 @@
+// src/components/layout/Sidebar.jsx
 import { useMemo } from 'react'
 import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ShoppingBag,
@@ -8,71 +9,73 @@ import {
 import SneakersLogo from '../login/SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
 import { useProducts } from '../../context/ProductsContext'
+import { usePermissions } from '../../hooks/usePermissions'
 
 const NAV_SECTIONS = [
   {
     label: 'Principal',
     items: [
-      { key: 'dashboard',     label: 'Dashboard',           icon: LayoutDashboard },
-      { key: 'pos',           label: 'Punto de venta',      icon: ShoppingCart },
-      { key: 'sales-history', label: 'Historial de ventas', icon: Receipt },
+      { key: 'dashboard',     label: 'Dashboard',           icon: LayoutDashboard, permission: 'dashboard.view' },
+      { key: 'pos',           label: 'Punto de venta',      icon: ShoppingCart,    permission: 'pos.access' },
+      { key: 'sales-history', label: 'Historial de ventas', icon: Receipt,         permission: 'sales.view' },
     ],
   },
   {
     label: 'Catálogo',
     items: [
-      { key: 'products', label: 'Productos', icon: Package },
+      { key: 'products', label: 'Productos', icon: Package, permission: 'products.view' },
     ],
   },
   {
     label: 'Inventario',
     items: [
-      { key: 'inventory',           label: 'Inventario general', icon: Warehouse },
-      { key: 'inventory-movements', label: 'Movimientos',        icon: Activity },
-      { key: 'inventory-adjust',    label: 'Ajuste',             icon: SlidersHorizontal },
-      { key: 'inventory-alerts',    label: 'Alertas de stock',   icon: AlertTriangle, badge: 'alerts' },
+      { key: 'inventory',           label: 'Inventario general', icon: Warehouse,          permission: 'inventory.view' },
+      { key: 'inventory-movements', label: 'Movimientos',        icon: Activity,           permission: 'inventory.movements' },
+      { key: 'inventory-adjust',    label: 'Ajuste',             icon: SlidersHorizontal,  permission: 'inventory.adjust' },
+      { key: 'inventory-alerts',    label: 'Alertas de stock',   icon: AlertTriangle,      permission: 'inventory.view', badge: 'alerts' },
     ],
   },
   {
     label: 'Compras',
     items: [
-      { key: 'purchases', label: 'Compras', icon: ShoppingBag },
+      { key: 'purchases', label: 'Compras', icon: ShoppingBag, permission: 'purchases.view' },
     ],
   },
   {
     label: 'Caja',
     items: [
-      { key: 'cash-open',    label: 'Apertura de caja', icon: Wallet },
-      { key: 'cash-current', label: 'Caja actual',      icon: Wallet },
-      { key: 'cash-close',   label: 'Cierre de caja',   icon: Wallet },
-      { key: 'cash-history', label: 'Historial de cajas', icon: History },
+      { key: 'cash-open',    label: 'Apertura de caja',   icon: Wallet,  permission: 'cash.open' },
+      { key: 'cash-current', label: 'Caja actual',        icon: Wallet,  permission: 'cash.view' },
+      { key: 'cash-close',   label: 'Cierre de caja',     icon: Wallet,  permission: 'cash.close' },
+      { key: 'cash-history', label: 'Historial de cajas', icon: History, permission: 'cash.history' },
     ],
   },
   {
     label: 'Operación',
     items: [
-      { key: 'wholesale',  label: 'Clientes mayoristas', icon: UserCog },
+      { key: 'wholesale', label: 'Clientes mayoristas', icon: UserCog, permission: 'wholesale.view' },
     ],
   },
   {
-  label: 'Administración',
-  items: [
-    { key: 'users',   label: 'Usuarios y empleados', icon: Users },
-    { key: 'roles',   label: 'Roles y permisos',     icon: ShieldCheck },
-    { key: 'reports', label: 'Reportes',             icon: BarChart3 },
-    { key: 'audit',   label: 'Historial y auditoría', icon: History },
-  ],
-},
+    label: 'Administración',
+    items: [
+      { key: 'users',   label: 'Usuarios y empleados', icon: Users,        permission: 'users.view' },
+      { key: 'roles',   label: 'Roles y permisos',     icon: ShieldCheck,  permission: 'roles.view' },
+      { key: 'reports', label: 'Reportes',             icon: BarChart3,    permission: 'reports.view' },
+      { key: 'audit',   label: 'Historial y auditoría', icon: History,     permission: 'audit.view' },
+    ],
+  },
   {
     label: 'Sistema',
     items: [
-      { key: 'settings', label: 'Configuración', icon: Settings },
+      { key: 'settings', label: 'Configuración', icon: Settings, permission: 'settings.view' },
     ],
   },
 ]
 
 export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpen, onCloseMobile, user }) {
   const { products } = useProducts()
+  const { can } = usePermissions()
 
   /**
    * Cuenta global de alertas de stock (agotados + stock bajo).
@@ -96,6 +99,19 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
     })
     return count
   }, [products])
+
+  /**
+   * Filtra las secciones según permisos del usuario.
+   * Una sección que queda vacía no se muestra.
+   */
+  const visibleSections = useMemo(() => {
+    return NAV_SECTIONS
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => can(item.permission)),
+      }))
+      .filter((section) => section.items.length > 0)
+  }, [can])
 
   const handleClick = (key) => {
     onNavigate?.(key)
@@ -137,50 +153,56 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
 
         {/* Navegación */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.label}>
-              <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-muted">
-                {section.label}
-              </p>
-              <ul className="space-y-0.5">
-                {section.items.map(({ key, label, icon: Icon, badge }) => {
-                  const active = key === activeKey
-                  const showBadge = badge === 'alerts' && alertCount > 0
+          {visibleSections.length === 0 ? (
+            <p className="px-3 py-6 text-xs text-gray-500 dark:text-dark-muted text-center">
+              No tienes acceso a ningún módulo.
+            </p>
+          ) : (
+            visibleSections.map((section) => (
+              <div key={section.label}>
+                <p className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-muted">
+                  {section.label}
+                </p>
+                <ul className="space-y-0.5">
+                  {section.items.map(({ key, label, icon: Icon, badge }) => {
+                    const active = key === activeKey
+                    const showBadge = badge === 'alerts' && alertCount > 0
 
-                  return (
-                    <li key={key}>
-                      <button
-                        type="button"
-                        onClick={() => handleClick(key)}
-                        className={`
-                          w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
-                          transition-colors duration-150
-                          ${active
-                            ? 'bg-blue-50 text-brand-blue dark:bg-blue-950/40 dark:text-blue-300'
-                            : 'text-gray-700 dark:text-dark-muted hover:bg-gray-50 dark:hover:bg-dark-card hover:text-brand-black dark:hover:text-dark-text'}
-                        `}
-                      >
-                        <Icon size={18} strokeWidth={1.9} />
-                        <span className="truncate flex-1 text-left">{label}</span>
-                        {showBadge && (
-                          <span className={`
-                            inline-flex items-center justify-center
-                            h-5 min-w-[20px] px-1.5 rounded-full
-                            text-[11px] font-semibold
+                    return (
+                      <li key={key}>
+                        <button
+                          type="button"
+                          onClick={() => handleClick(key)}
+                          className={`
+                            w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium
+                            transition-colors duration-150
                             ${active
-                              ? 'bg-brand-blue text-white'
-                              : 'bg-brand-red text-white'}
-                          `}>
-                            {alertCount > 99 ? '99+' : alertCount}
-                          </span>
-                        )}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          ))}
+                              ? 'bg-blue-50 text-brand-blue dark:bg-blue-950/40 dark:text-blue-300'
+                              : 'text-gray-700 dark:text-dark-muted hover:bg-gray-50 dark:hover:bg-dark-card hover:text-brand-black dark:hover:text-dark-text'}
+                          `}
+                        >
+                          <Icon size={18} strokeWidth={1.9} />
+                          <span className="truncate flex-1 text-left">{label}</span>
+                          {showBadge && (
+                            <span className={`
+                              inline-flex items-center justify-center
+                              h-5 min-w-[20px] px-1.5 rounded-full
+                              text-[11px] font-semibold
+                              ${active
+                                ? 'bg-brand-blue text-white'
+                                : 'bg-brand-red text-white'}
+                            `}>
+                              {alertCount > 99 ? '99+' : alertCount}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
         </nav>
 
         {/* Theme toggle + Perfil */}

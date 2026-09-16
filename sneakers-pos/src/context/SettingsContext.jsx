@@ -1,46 +1,100 @@
 // src/context/SettingsContext.jsx
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { DEFAULT_SETTINGS, mergeSettings, settingsEqual } from '../data/settings'
+import { settingsRepo } from '../repositories/settingsRepo'
+import { useNetwork } from './NetworkContext'
 
 const SettingsContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-settings'
-
 export function SettingsProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [draft, setDraft] = useState(DEFAULT_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  // Cargar
-  useEffect(() => {
+  // -------------------------------------------------------------
+  // Cargar local
+  // -------------------------------------------------------------
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        const parsed = mergeSettings(DEFAULT_SETTINGS, JSON.parse(raw))
-        setSettings(parsed)
-        setDraft(parsed)
+      const local = await settingsRepo.getLocal()
+      if (local && mountedRef.current) {
+        const merged = mergeSettings(DEFAULT_SETTINGS, local)
+        setSettings(merged)
+        setDraft(merged)
       }
-    } catch (e) {
-      console.warn('No se pudo leer la configuración:', e)
-    } finally {
-      setLoading(false)
+    } catch (err) {
+      console.error('❌ Error cargando config local:', err)
     }
   }, [])
 
-  // Persistir
-  useEffect(() => {
-    if (loading) return
+  // -------------------------------------------------------------
+  // Sync remoto
+  // -------------------------------------------------------------
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-    } catch (e) {
-      console.warn('No se pudo guardar la configuración:', e)
+      const remote = await settingsRepo.syncFromSupabase()
+      if (remote && mountedRef.current) {
+        const merged = mergeSettings(DEFAULT_SETTINGS, remote)
+        setSettings(merged)
+        setDraft(merged)
+      }
+    } catch (err) {
+      console.warn('⚠️ Sync de settings falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [settings, loading])
+  }, [isOnline])
+
+  // -------------------------------------------------------------
+  // Al montar
+  // -------------------------------------------------------------
+  useEffect(() => {
+    mountedRef.current = true
+
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+
+      // Sync remoto en background
+      if (isOnline) syncRemote()
+    }
+
+    init()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [loadLocal, syncRemote, isOnline])
+
+  // -------------------------------------------------------------
+  // Al reconectar
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!isOnline) return
+    const timer = setTimeout(() => syncRemote(), 1500)
+    return () => clearTimeout(timer)
+  }, [isOnline, syncRemote])
+
+  // -------------------------------------------------------------
+  // API
+  // -------------------------------------------------------------
 
   const isDirty = !settingsEqual(settings, draft)
 
-  /** Actualiza una sección del draft */
   const updateSection = useCallback((section, patch) => {
     setDraft((d) => ({
       ...d,
@@ -48,35 +102,37 @@ export function SettingsProvider({ children }) {
     }))
   }, [])
 
-  /** Reemplaza todo el draft (por ejemplo al agregar sucursal) */
   const updateDraft = useCallback((updater) => {
     setDraft((d) => (typeof updater === 'function' ? updater(d) : updater))
   }, [])
 
-  /** Descarta cambios */
   const discard = useCallback(() => {
     setDraft(settings)
   }, [settings])
 
-  /** Guarda los cambios */
   const save = useCallback(async () => {
     setSaving(true)
     try {
-      // TODO: reemplazar por fetch al backend
-      await new Promise((r) => setTimeout(r, 500))
+      await settingsRepo.save(draft)
       setSettings(draft)
       return { ok: true }
     } catch (e) {
+      console.error('❌ Error al guardar configuración:', e)
       return { ok: false, error: e?.message || 'Error al guardar' }
     } finally {
       setSaving(false)
     }
   }, [draft])
 
-  /** Reset completo (útil para pruebas) */
-  const clearAll = useCallback(() => {
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
+
+  const clearAll = useCallback(async () => {
     setSettings(DEFAULT_SETTINGS)
     setDraft(DEFAULT_SETTINGS)
+    await settingsRepo.save(DEFAULT_SETTINGS)
   }, [])
 
   const value = {
@@ -84,11 +140,13 @@ export function SettingsProvider({ children }) {
     draft,
     loading,
     saving,
+    syncing,
     isDirty,
     updateSection,
     updateDraft,
     discard,
     save,
+    refresh,
     clearAll,
   }
 

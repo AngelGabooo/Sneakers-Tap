@@ -1,45 +1,79 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+// src/context/CashContext.jsx
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { cashRepo } from '../repositories/cashRepo'
+import { useNetwork } from './NetworkContext'
 
 const CashContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-cash-sessions'
-
 /**
- * Sesiones de caja.
- * Una sesión representa una jornada de operación en una caja específica.
+ * Sesiones de caja con estrategia offline-first.
  */
 export function CashProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setSessions(JSON.parse(raw))
-    } catch (e) {
-      console.warn('No se pudo leer las sesiones de caja:', e)
-    } finally {
-      setLoading(false)
+      const list = await cashRepo.getAllLocal()
+      if (mountedRef.current) setSessions(list)
+      return list
+    } catch (err) {
+      console.error('❌ Error cargando cajas locales:', err)
+      return []
     }
   }, [])
 
-  useEffect(() => {
-    if (loading) return
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
-    } catch (e) {
-      console.warn('No se pudo guardar las sesiones de caja:', e)
+      await cashRepo.syncFromSupabase()
+      await loadLocal()
+    } catch (err) {
+      console.warn('⚠️ Sync de cajas falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [sessions, loading])
+  }, [isOnline, loadLocal])
 
-  /** Devuelve la sesión abierta de una caja concreta, si existe. */
+  useEffect(() => {
+    mountedRef.current = true
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+      if (isOnline) syncRemote()
+    }
+    init()
+    return () => { mountedRef.current = false }
+  }, [loadLocal, syncRemote, isOnline])
+
+  useEffect(() => {
+    if (!isOnline) return
+    const timer = setTimeout(() => syncRemote(), 1500)
+    return () => clearTimeout(timer)
+  }, [isOnline, syncRemote])
+
+  // -----------------------------------------------------------------
+  // API
+  // -----------------------------------------------------------------
+
   const getOpenSession = useCallback(
     (cashId) =>
       sessions.find((s) => s.cashId === cashId && s.status === 'open') || null,
     [sessions],
   )
 
-  /** Devuelve cualquier sesión abierta en el sistema (la primera que encuentre). */
   const getAnyOpenSession = useCallback(
     () => sessions.find((s) => s.status === 'open') || null,
     [sessions],
@@ -50,79 +84,48 @@ export function CashProvider({ children }) {
     [sessions],
   )
 
-  /**
-   * Abre una caja: crea una sesión nueva con estado 'open'.
-   */
-  const openCash = useCallback((payload) => {
-    const now = new Date().toISOString()
-    const id = `CAJ-${String(Date.now()).slice(-6)}`
-
-    const session = {
-      id,
-      cashId: payload.cashId,
-      cashLabel: payload.cashLabel,
-      branch: payload.branch,
-      responsibleId: payload.responsibleId || null,
-      responsibleName: payload.responsibleName,
-      responsibleRole: payload.responsibleRole,
-      openedAt: now,
-      openedBy: payload.openedBy || payload.responsibleName,
-      initialFund: Number(payload.initialFund) || 0,
-      breakdown: payload.breakdown || null,
-      note: payload.note || '',
-      status: 'open',
-      closedAt: null,
-      closedBy: null,
-      sales: [],
-      movements: [
-        {
-          type: 'opening',
-          label: 'Apertura de caja',
-          amount: Number(payload.initialFund) || 0,
-          at: now,
-          by: payload.responsibleName,
-        },
-      ],
-    }
-
+  const openCash = useCallback(async (payload) => {
+    const session = await cashRepo.open(payload)
     setSessions((list) => [session, ...list])
     return session
   }, [])
 
-  /**
-   * Cierra una sesión de caja.
-   */
-  const closeCash = useCallback((sessionId, payload = {}) => {
-    const now = new Date().toISOString()
-    let updated = null
+  const closeCash = useCallback(async (sessionId, payload = {}) => {
+    const updated = await cashRepo.close(sessionId, payload)
     setSessions((list) =>
-      list.map((s) => {
-        if (s.id !== sessionId) return s
-        updated = {
-          ...s,
-          status: 'closed',
-          closedAt: now,
-          closedBy: payload.closedBy || s.responsibleName,
-          closingFund: Number(payload.closingFund) || null,
-          closingNotes: payload.notes || '',
-        }
-        return updated
-      }),
+      list.map((s) => (s.id === sessionId ? updated : s)),
     )
     return updated
   }, [])
 
-  const clearAll = useCallback(() => setSessions([]), [])
+  const addMovement = useCallback(async (payload) => {
+    const movement = await cashRepo.addMovement(payload)
+    // Actualizar el estado local
+    setSessions((list) =>
+      list.map((s) => {
+        if (s.id !== payload.sessionId) return s
+        return { ...s, movements: [...(s.movements || []), movement] }
+      }),
+    )
+    return movement
+  }, [])
+
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
 
   const value = {
     sessions,
     loading,
+    syncing,
     getOpenSession,
     getAnyOpenSession,
     getSessionById,
     openCash,
     closeCash,
-    clearAll,
+    addMovement,
+    refresh,
   }
 
   return <CashContext.Provider value={value}>{children}</CashContext.Provider>

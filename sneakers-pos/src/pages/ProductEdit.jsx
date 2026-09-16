@@ -1,3 +1,4 @@
+// src/pages/ProductEdit.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Save, X, PackageX } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -5,7 +6,10 @@ import ProductGeneralSection from '../components/products/ProductGeneralSection'
 import ProductIdentificationSection from '../components/products/ProductIdentificationSection'
 import ProductImagesSection from '../components/products/ProductImagesSection'
 import ProductPricingSection from '../components/products/ProductPricingSection'
-import ProductVariantsSection from '../components/products/ProductVariantsSection'
+import ProductVariantsSection, {
+  buildVariantSku,
+  buildVariantBarcode,
+} from '../components/products/ProductVariantsSection'
 import ProductInventorySection from '../components/products/ProductInventorySection'
 import ProductSupplierSection from '../components/products/ProductSupplierSection'
 import ProductStatusPanel from '../components/products/ProductStatusPanel'
@@ -19,15 +23,54 @@ import EmptyState from '../components/common/EmptyState'
 import Toast from '../components/common/Toast'
 import { useView } from '../context/ViewContext'
 import { useProducts } from '../context/ProductsContext'
+import { useAuth } from '../context/AuthContext'
+import { storageService } from '../services/storageService'
 import { generateSku, generateBarcode } from '../utils/codeGenerator'
 
-/**
- * Editar producto.
- * Carga el producto desde el store por id (viewParams.id),
- * precarga los campos y permite guardar los cambios.
- */
+function migrateToVariantsBySize(product) {
+  if (!product) return {}
+  if (product.variantsBySize && typeof product.variantsBySize === 'object') {
+    return product.variantsBySize
+  }
+  const map = {}
+  ;(product.variants || []).forEach((v) => {
+    if (!v.size || !v.color) return
+    if (!map[v.size]) map[v.size] = []
+    if (!map[v.size].includes(v.color)) map[v.size].push(v.color)
+  })
+  if (Object.keys(map).length === 0 && product.sizes) {
+    product.sizes.forEach((s) => { map[s] = [] })
+  }
+  return map
+}
+
+function variantsFromSizeColorMap(variantsBySize, baseSku, previous = []) {
+  if (!baseSku) return []
+  const prevMap = new Map(previous.map((v) => [v.id, v]))
+  const list = []
+  Object.entries(variantsBySize).forEach(([size, colors]) => {
+    ;(colors || []).forEach((color) => {
+      const id = `${size}-${color}`
+      const sku = buildVariantSku(baseSku, size, color)
+      const barcode = buildVariantBarcode(sku)
+      const prev = prevMap.get(id)
+      list.push({
+        id,
+        label: `${size} / ${color}`,
+        size,
+        color,
+        sku: prev?.sku || sku,
+        barcode: prev?.barcode || String(barcode),
+        stock: prev?.stock ?? 0,
+      })
+    })
+  })
+  return list
+}
+
 export default function ProductEdit() {
   const { setActiveView, viewParams } = useView()
+  const { user } = useAuth()
   const { getProductById, updateProduct } = useProducts()
 
   const productId = viewParams?.id
@@ -38,17 +81,17 @@ export default function ProductEdit() {
 
   const [form, setForm] = useState(null)
   const [errors, setErrors] = useState({})
-  const [sizes, setSizes] = useState([])
-  const [colors, setColors] = useState([])
+  const [variantsBySize, setVariantsBySize] = useState({})
   const [variants, setVariants] = useState([])
   const [images, setImages] = useState([])
+  const [codeType, setCodeType] = useState('barcode')
   const [submitting, setSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [toast, setToast] = useState(null)
   const [dirty, setDirty] = useState(false)
 
   const barcodeAutoRef = useRef(true)
 
-  // 🚧 TODO: cargar desde backend. Reemplazar por GET /api/products/:id
   useEffect(() => {
     if (!productId) { setNotFound(true); setLoading(false); return }
     if (!product) { setNotFound(true); setLoading(false); return }
@@ -69,44 +112,33 @@ export default function ProductEdit() {
       supplier: product.supplier || '',
       status: product.status || 'active',
     })
-    setSizes(product.sizes || [])
-    setColors(product.colors || [])
+
+    const migrated = migrateToVariantsBySize(product)
+    setVariantsBySize(migrated)
     setVariants(product.variants || [])
     setImages(product.images || [])
+    setCodeType(product.codeType || 'barcode')
     setLoading(false)
     setDirty(false)
-    // Si el producto ya tenía un código, no forzamos regenerarlo al montar
     barcodeAutoRef.current = !product.barcode
   }, [productId, product])
 
-  // 🚧 TODO: reemplazar por las opciones del backend
   const options = { categories: [], brands: [], locations: [], suppliers: [] }
-
-  // -------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------
 
   const handleChange = (field, value) => {
     setForm((f) => {
       const next = { ...f, [field]: value }
-
       if (field === 'barcode') barcodeAutoRef.current = false
-
       return next
     })
     setDirty(true)
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
-  /**
-   * 🔑 Regenerar código cuando cambia el nombre o el SKU base.
-   * Solo si el usuario no ha editado el barcode manualmente.
-   */
   useEffect(() => {
     if (!form) return
     if (!barcodeAutoRef.current) return
     if (!form.name || !form.sku) return
-
     const code = generateBarcode(form.sku)
     if (code !== form.barcode) {
       setForm((f) => ({ ...f, barcode: code }))
@@ -115,22 +147,14 @@ export default function ProductEdit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form?.name, form?.sku])
 
-  const handleChangeSizes = (next) => {
-    setSizes(next)
-    setVariants((list) => rebuildVariants(list, next, colors))
-    setDirty(true)
-  }
+  useEffect(() => {
+    if (!form?.sku) return
+    setVariants((prev) => variantsFromSizeColorMap(variantsBySize, form.sku, prev))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variantsBySize, form?.sku])
 
-  const handleChangeColors = (next) => {
-    setColors(next)
-    setVariants((list) => rebuildVariants(list, sizes, next))
-    setDirty(true)
-  }
-
-  const handleChangeVariant = (id, field, value) => {
-    setVariants((list) =>
-      list.map((v) => (v.id === id ? { ...v, [field]: value } : v)),
-    )
+  const handleChangeVariantsBySize = (next) => {
+    setVariantsBySize(next)
     setDirty(true)
   }
 
@@ -151,10 +175,6 @@ export default function ProductEdit() {
 
   const handleScan = () => console.log('Escanear código')
 
-  // -------------------------------------------------------------
-  // Validación y guardado
-  // -------------------------------------------------------------
-
   const validate = () => {
     const e = {}
     if (!form.name.trim()) e.name = 'El nombre del producto es obligatorio.'
@@ -168,29 +188,61 @@ export default function ProductEdit() {
     return Object.keys(e).length === 0
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return
     setSubmitting(true)
+    setUploading(true)
 
-    const payload = {
-      ...form,
-      sizes,
-      colors,
-      variants,
-      images: images.map(({ id, isPrimary, url }) => ({ id, isPrimary, url })),
-    }
+    try {
+      // 1. Subir imágenes pendientes
+      let finalImages = []
+      if (images.length > 0) {
+        finalImages = await storageService.uploadMany(images, 'products')
+      }
 
-    // 🚧 TODO: PUT /api/products/:id
-    updateProduct(productId, payload)
+      // 2. Preparar variantes
+      const safeVariants = variants.map((v) => {
+        const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
+        const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
+        return {
+          ...v,
+          sku: String(variantSku || ''),
+          barcode: String(variantBarcode || ''),
+        }
+      })
 
-    setTimeout(() => {
+      const sizesList = Object.keys(variantsBySize)
+      const colorsList = Array.from(new Set(Object.values(variantsBySize).flat()))
+
+      const payload = {
+        ...form,
+        sizes: sizesList,
+        colors: colorsList,
+        variants: safeVariants,
+        variantsBySize,
+        codeType,
+        images: finalImages,
+        updatedBy: user?.name || 'Sistema',
+      }
+
+      await updateProduct(productId, payload)
+
       setSubmitting(false)
+      setUploading(false)
       setDirty(false)
       setToast({
         title: 'Producto actualizado correctamente',
         description: `Los cambios de ${form.name} se guardaron.`,
       })
-    }, 600)
+    } catch (err) {
+      console.error('❌ Error actualizando producto:', err)
+      setSubmitting(false)
+      setUploading(false)
+      setToast({
+        title: 'Error al guardar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleCancel = () => {
@@ -204,10 +256,6 @@ export default function ProductEdit() {
   }
 
   const handleNavigate = (key) => setActiveView(key)
-
-  // -------------------------------------------------------------
-  // Derivados
-  // -------------------------------------------------------------
 
   const summary = useMemo(() => ({
     name: form?.name || '',
@@ -226,10 +274,6 @@ export default function ProductEdit() {
     imageUrl: images[0]?.url || null,
   }), [form, images])
 
-  // -------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------
-
   return (
     <DashboardLayout
       activeKey="products"
@@ -237,7 +281,6 @@ export default function ProductEdit() {
       period={undefined}
       onPeriodChange={undefined}
     >
-      {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm mb-5">
         <button
           onClick={handleBack}
@@ -249,7 +292,6 @@ export default function ProductEdit() {
         <span className="text-brand-black dark:text-dark-text font-medium">Editar producto</span>
       </nav>
 
-      {/* Not found */}
       {!loading && notFound && (
         <Card>
           <EmptyState
@@ -265,13 +307,10 @@ export default function ProductEdit() {
         </Card>
       )}
 
-      {/* Loading */}
       {loading && !notFound && <EditSkeleton />}
 
-      {/* Formulario */}
       {!loading && !notFound && form && (
         <>
-          {/* Encabezado */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -286,7 +325,7 @@ export default function ProductEdit() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="secondary" icon={X} onClick={handleCancel}>
+              <Button variant="secondary" icon={X} onClick={handleCancel} disabled={submitting}>
                 Cancelar
               </Button>
               <Button variant="primary" icon={Save} onClick={handleSubmit} loading={submitting}>
@@ -295,7 +334,6 @@ export default function ProductEdit() {
             </div>
           </div>
 
-          {/* Identificación rápida del producto */}
           <Card className="mb-5">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-lg bg-gray-100 dark:bg-dark-surface overflow-hidden shrink-0 flex items-center justify-center">
@@ -317,15 +355,9 @@ export default function ProductEdit() {
             </div>
           </Card>
 
-          {/* Layout principal */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 space-y-5">
-              <ProductGeneralSection
-                values={form}
-                errors={errors}
-                onChange={handleChange}
-                options={options}
-              />
+              <ProductGeneralSection values={form} errors={errors} onChange={handleChange} options={options} />
 
               <ProductIdentificationSection
                 values={form}
@@ -334,19 +366,32 @@ export default function ProductEdit() {
                 onGenerateSku={handleGenerateSku}
                 onRegenerateBarcode={handleRegenerateBarcode}
                 onScan={handleScan}
+                onCodeTypeChange={setCodeType}
               />
 
-              <ProductImagesSection images={images} onChange={(v) => { setImages(v); setDirty(true) }} />
+              <ProductImagesSection
+                images={images}
+                onChange={(v) => { setImages(v); setDirty(true) }}
+                uploading={uploading}
+              />
 
               <ProductPricingSection values={form} errors={errors} onChange={handleChange} />
 
               <ProductVariantsSection
-                sizes={sizes}
-                colors={colors}
+                variantsBySize={variantsBySize}
                 variants={variants}
-                onChangeSizes={handleChangeSizes}
-                onChangeColors={handleChangeColors}
-                onChangeVariant={handleChangeVariant}
+                baseSku={form.sku}
+                codeType={codeType}
+                productName={form.name}
+                productPrice={form.salePrice}
+                onChangeVariantsBySize={handleChangeVariantsBySize}
+                onChangeVariantsBulk={(updater) => {
+                  setVariants((list) => {
+                    const next = typeof updater === 'function' ? updater(list) : updater
+                    return next
+                  })
+                  setDirty(true)
+                }}
               />
 
               <ProductInventorySection
@@ -354,6 +399,14 @@ export default function ProductEdit() {
                 errors={errors}
                 onChange={handleChange}
                 options={options}
+                summary={{
+                  totalStock: variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0),
+                  variantsCount: variants.length,
+                  lowStockCount: variants.filter(
+                    (v) => Number(v.stock) > 0 && Number(v.stock) <= (Number(form.minStock) || 0),
+                  ).length,
+                  outOfStockCount: variants.filter((v) => Number(v.stock) === 0).length,
+                }}
               />
 
               <ProductSupplierSection
@@ -363,9 +416,8 @@ export default function ProductEdit() {
                 onCreateSupplier={() => console.log('Crear proveedor → Vista #24 (pendiente)')}
               />
 
-              {/* Acciones inferiores */}
               <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
-                <Button variant="secondary" icon={X} onClick={handleCancel}>
+                <Button variant="secondary" icon={X} onClick={handleCancel} disabled={submitting}>
                   Cancelar
                 </Button>
                 <Button variant="primary" icon={Save} onClick={handleSubmit} loading={submitting}>
@@ -374,16 +426,11 @@ export default function ProductEdit() {
               </div>
             </div>
 
-            {/* Panel lateral */}
             <aside className="lg:col-span-1 space-y-5 lg:sticky lg:top-20 lg:self-start">
-              <ProductStatusPanel
-                value={form.status}
-                onChange={(v) => handleChange('status', v)}
-              />
+              <ProductStatusPanel value={form.status} onChange={(v) => handleChange('status', v)} />
               <ProductSummaryPanel summary={summary} />
               <ProductPreviewPanel preview={preview} />
 
-              {/* Última actualización */}
               <Card>
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-muted mb-2">
                   Última actualización
@@ -400,7 +447,7 @@ export default function ProductEdit() {
 
           <Toast
             open={!!toast}
-            variant="success"
+            variant={toast?.title?.includes('Error') ? 'error' : 'success'}
             title={toast?.title}
             description={toast?.description}
             onClose={() => setToast(null)}
@@ -409,40 +456,6 @@ export default function ProductEdit() {
       )}
     </DashboardLayout>
   )
-}
-
-// -----------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------
-
-/**
- * Reconstruye las variantes al cambiar tallas/colores,
- * conservando el stock existente de las combinaciones que ya estaban.
- */
-function rebuildVariants(current, nextSizes, nextColors) {
-  if (nextSizes.length === 0 || nextColors.length === 0) return []
-
-  const map = new Map(current.map((v) => [v.id, v]))
-  const generated = []
-
-  nextSizes.forEach((size) => {
-    nextColors.forEach((color) => {
-      const id = `${size}-${color}`
-      const prev = map.get(id)
-      generated.push(
-        prev || {
-          id,
-          label: `${size} / ${color}`,
-          size,
-          color,
-          sku: '',
-          barcode: '',
-          stock: 0,
-        },
-      )
-    })
-  })
-  return generated
 }
 
 function EditSkeleton() {

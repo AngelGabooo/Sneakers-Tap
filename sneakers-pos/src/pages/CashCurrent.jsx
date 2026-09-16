@@ -1,3 +1,4 @@
+// src/pages/CashCurrent.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -21,6 +22,7 @@ import CashCurrentRetiroConfirmModal from '../components/cash/current/CashCurren
 import { useView } from '../context/ViewContext'
 import { useCash } from '../context/CashContext'
 import { useSales } from '../context/SalesContext'
+import { notifyCashClose } from '../utils/notifyAdmins'
 
 function computeSessionAggregates(session, sales = []) {
   if (!session) {
@@ -55,6 +57,7 @@ function computeSessionAggregates(session, sales = []) {
   const salesCount = sessionSales.length
   const cashSales = payments.cash?.amount || 0
 
+  // ✅ Excluir "Apertura de caja" del cálculo de cashIn
   const rawMovements = session.movements || []
   let runningCash = 0
   const movements = rawMovements.map((m) => {
@@ -63,8 +66,9 @@ function computeSessionAggregates(session, sales = []) {
   })
 
   const cashIn = movements
-    .filter((m) => m.type === 'in')
+    .filter((m) => m.type === 'in' && m.label !== 'Apertura de caja')
     .reduce((a, m) => a + Number(m.amount || 0), 0)
+
   const cashOut = Math.abs(
     movements
       .filter((m) => m.type === 'out')
@@ -79,7 +83,7 @@ function computeSessionAggregates(session, sales = []) {
     totalSales,
     salesCount,
     cashSales,
-    cashIn: cashIn + Number(session.initialFund || 0),
+    cashIn,   // ✅ Ahora sin la apertura
     cashOut,
     expectedCash,
     payments,
@@ -92,7 +96,7 @@ function computeSessionAggregates(session, sales = []) {
 
 export default function CashCurrent() {
   const { navigate } = useView()
-  const { getAnyOpenSession } = useCash()
+  const { getAnyOpenSession, addMovement } = useCash()
   const { sales } = useSales()
 
   const session = getAnyOpenSession()
@@ -126,8 +130,9 @@ export default function CashCurrent() {
     setMovementOpen(true)
   }
 
-  const handleMovementConfirm = ({ type, amount, reason, note }) => {
+  const handleMovementConfirm = async ({ type, amount, reason, note }) => {
     if (!session) return
+
     if (type === 'out') {
       setRetiroConfirm({
         amount,
@@ -138,20 +143,45 @@ export default function CashCurrent() {
       setMovementOpen(false)
       return
     }
+
     setSubmitting(true)
-    setTimeout(() => {
+    try {
+      await addMovement({
+        sessionId: session.id,
+        type: 'in',
+        label: reason || 'Ingreso de efectivo',
+        amount: Number(amount),
+        notes: note,
+        createdBy: 'Usuario',
+      })
       setSubmitting(false)
       setMovementOpen(false)
       setToast({
         title: 'Movimiento registrado',
         description: `Entrada de $${Number(amount).toLocaleString('es-MX')}.`,
       })
-    }, 500)
+    } catch (err) {
+      console.error('❌ Error registrando movimiento:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al registrar movimiento',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
-  const handleRetiroConfirm = () => {
+  const handleRetiroConfirm = async () => {
+    if (!session || !retiroConfirm) return
     setSubmitting(true)
-    setTimeout(() => {
+    try {
+      await addMovement({
+        sessionId: session.id,
+        type: 'out',
+        label: retiroConfirm.reason || 'Retiro de efectivo',
+        amount: Number(retiroConfirm.amount),
+        notes: retiroConfirm.note,
+        createdBy: 'Usuario',
+      })
       const amount = retiroConfirm.amount
       setSubmitting(false)
       setRetiroConfirm(null)
@@ -159,7 +189,14 @@ export default function CashCurrent() {
         title: 'Retiro registrado',
         description: `Se registró un retiro de $${Number(amount).toLocaleString('es-MX')}.`,
       })
-    }, 500)
+    } catch (err) {
+      console.error('❌ Error registrando retiro:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al registrar retiro',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleCountConfirm = ({ counted, difference }) => {
@@ -199,7 +236,7 @@ export default function CashCurrent() {
   const summary = {
     initialFund: Number(session?.initialFund || 0),
     cashSales: aggregates.cashSales,
-    cashIn: aggregates.cashIn - Number(session?.initialFund || 0),
+    cashIn: aggregates.cashIn,
     cashOut: aggregates.cashOut,
     expectedCash: aggregates.expectedCash,
   }
@@ -306,7 +343,7 @@ export default function CashCurrent() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

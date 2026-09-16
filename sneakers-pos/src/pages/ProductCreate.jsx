@@ -1,3 +1,4 @@
+// src/pages/ProductCreate.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProductFormHeader from '../components/products/ProductFormHeader'
@@ -17,6 +18,8 @@ import ProductPreviewPanel from '../components/products/ProductPreviewPanel'
 import Toast from '../components/common/Toast'
 import { useView } from '../context/ViewContext'
 import { useProducts } from '../context/ProductsContext'
+import { useAuth } from '../context/AuthContext'
+import { storageService } from '../services/storageService'
 import { generateSku, generateBarcode } from '../utils/codeGenerator'
 
 const INITIAL_FORM = {
@@ -36,13 +39,13 @@ const INITIAL_FORM = {
   status: 'active',
 }
 
-function buildVariants(nextSizes, nextColors, baseSku, previous = []) {
-  if (!baseSku || nextSizes.length === 0 || nextColors.length === 0) return []
+function variantsFromSizeColorMap(variantsBySize, baseSku, previous = []) {
+  if (!baseSku) return []
   const prevMap = new Map(previous.map((v) => [v.id, v]))
   const list = []
 
-  nextSizes.forEach((size) => {
-    nextColors.forEach((color) => {
+  Object.entries(variantsBySize).forEach(([size, colors]) => {
+    ;(colors || []).forEach((color) => {
       const id = `${size}-${color}`
       const sku = buildVariantSku(baseSku, size, color)
       const barcode = buildVariantBarcode(sku)
@@ -58,20 +61,22 @@ function buildVariants(nextSizes, nextColors, baseSku, previous = []) {
       })
     })
   })
+
   return list
 }
 
 export default function ProductCreate() {
   const { setActiveView } = useView()
+  const { user } = useAuth()
   const { createProduct } = useProducts()
 
   const [form, setForm] = useState(INITIAL_FORM)
   const [errors, setErrors] = useState({})
-  const [sizes, setSizes] = useState([])
-  const [colors, setColors] = useState([])
+  const [variantsBySize, setVariantsBySize] = useState({})
   const [variants, setVariants] = useState([])
   const [images, setImages] = useState([])
   const [submitting, setSubmitting] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [toast, setToast] = useState(null)
 
   const [codeType, setCodeType] = useState('barcode')
@@ -94,7 +99,6 @@ export default function ProductCreate() {
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
-  // 🔑 Auto-generación del código base
   useEffect(() => {
     if (!barcodeAutoRef.current) return
     if (!form.name || !form.sku) return
@@ -105,14 +109,14 @@ export default function ProductCreate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.name, form.sku])
 
-  // 🔄 Regenerar variantes
   useEffect(() => {
-    setVariants((prev) => buildVariants(sizes, colors, form.sku, prev))
+    setVariants((prev) => variantsFromSizeColorMap(variantsBySize, form.sku, prev))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizes, colors, form.sku])
+  }, [variantsBySize, form.sku])
 
-  const handleChangeSizes = (next) => setSizes(next)
-  const handleChangeColors = (next) => setColors(next)
+  const handleChangeVariantsBySize = (next) => {
+    setVariantsBySize(next)
+  }
 
   const handleGenerateSku = () => {
     const sku = generateSku({ brand: form.brand, name: form.name })
@@ -143,57 +147,68 @@ export default function ProductCreate() {
   }
 
   // -------------------------------------------------------------
-  // Guardar
+  // Guardar (con subida de imágenes)
   // -------------------------------------------------------------
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return
     setSubmitting(true)
+    setUploading(true)
 
-    // 🔑 Asegurar que cada variante tenga barcode
-    const safeVariants = variants.map((v) => {
-      const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
-      const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
-      return {
-        ...v,
-        sku: String(variantSku || ''),
-        barcode: String(variantBarcode || ''),
+    try {
+      // 1. Subir imágenes pendientes
+      let finalImages = []
+      if (images.length > 0) {
+        finalImages = await storageService.uploadMany(images, 'products')
       }
-    })
 
-    const payload = {
-      ...form,
-      barcode: String(form.barcode || ''),
-      sku: String(form.sku || ''),
-      variants: safeVariants,
-      sizes,
-      colors,
-      codeType,
-      images: images.map(({ id, isPrimary, url }) => ({ id, isPrimary, url })),
-    }
+      // 2. Preparar variantes
+      const safeVariants = variants.map((v) => {
+        const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
+        const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
+        return {
+          ...v,
+          sku: String(variantSku || ''),
+          barcode: String(variantBarcode || ''),
+        }
+      })
 
-    // 🔎 Diagnóstico
-    console.log('🔎 Producto a guardar:', {
-      name: payload.name,
-      sku: payload.sku,
-      barcode: payload.barcode,
-      variants: payload.variants.map((v) => ({
-        label: v.label,
-        barcode: v.barcode,
-        stock: v.stock,
-      })),
-    })
+      // 3. Preparar payload
+      const sizesList = Object.keys(variantsBySize)
+      const colorsList = Array.from(new Set(Object.values(variantsBySize).flat()))
 
-    const created = createProduct(payload)
-    console.log('✅ Producto creado:', created)
+      const payload = {
+        ...form,
+        barcode: String(form.barcode || ''),
+        sku: String(form.sku || ''),
+        variants: safeVariants,
+        variantsBySize,
+        sizes: sizesList,
+        colors: colorsList,
+        codeType,
+        images: finalImages,
+        createdBy: user?.name || 'Sistema',
+      }
 
-    setTimeout(() => {
+      // 4. Crear producto (offline-first, encola sync)
+      const created = await createProduct(payload)
+      console.log('✅ Producto creado:', created)
+
       setSubmitting(false)
+      setUploading(false)
       setToast({
         title: 'Producto creado correctamente',
         description: `${form.name} fue agregado al catálogo.`,
       })
       setTimeout(() => setActiveView('products'), 800)
-    }, 600)
+    } catch (err) {
+      console.error('❌ Error creando producto:', err)
+      setSubmitting(false)
+      setUploading(false)
+      setToast({
+        title: 'Error al crear el producto',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleCancel = () => {
@@ -258,18 +273,16 @@ export default function ProductCreate() {
             onScan={handleScan}
             onCodeTypeChange={setCodeType}
           />
-          <ProductImagesSection images={images} onChange={setImages} />
+          <ProductImagesSection images={images} onChange={setImages} uploading={uploading} />
           <ProductPricingSection values={form} errors={errors} onChange={handleChange} />
           <ProductVariantsSection
-            sizes={sizes}
-            colors={colors}
+            variantsBySize={variantsBySize}
             variants={variants}
             baseSku={form.sku}
             codeType={codeType}
             productName={form.name}
             productPrice={form.salePrice}
-            onChangeSizes={handleChangeSizes}
-            onChangeColors={handleChangeColors}
+            onChangeVariantsBySize={handleChangeVariantsBySize}
             onChangeVariantsBulk={setVariants}
           />
           <ProductInventorySection
@@ -290,7 +303,8 @@ export default function ProductCreate() {
             <button
               type="button"
               onClick={handleCancel}
-              className="h-11 px-5 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card text-brand-black dark:text-dark-text text-sm font-semibold hover:border-brand-blue hover:text-brand-blue transition-colors"
+              disabled={submitting}
+              className="h-11 px-5 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card text-brand-black dark:text-dark-text text-sm font-semibold hover:border-brand-blue hover:text-brand-blue disabled:opacity-60 transition-colors"
             >
               Cancelar
             </button>
@@ -314,7 +328,7 @@ export default function ProductCreate() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

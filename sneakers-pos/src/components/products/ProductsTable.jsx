@@ -1,3 +1,4 @@
+// src/components/products/ProductsTable.jsx
 import { ArrowUp, ArrowDown, Package, PackageX } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -7,10 +8,6 @@ import ProductRowActions from './ProductRowActions'
 import ProductsTableSkeleton from './ProductsTableSkeleton'
 import ProductsPagination from './ProductsPagination'
 
-/**
- * Tabla profesional de productos.
- * Los datos llegan por props. Si están vacíos, mostramos empty states.
- */
 export default function ProductsTable({
   items = [],
   loading = false,
@@ -23,7 +20,6 @@ export default function ProductsTable({
   onNew,
   searchQuery = '',
   onClearSearch,
-  // Paginación
   page, perPage, total, onPageChange, onPerPageChange,
 }) {
   const hasItems = items.length > 0
@@ -39,8 +35,8 @@ export default function ProductsTable({
       : <ArrowDown size={12} className="text-brand-blue" />
   }
 
-  const ThSortable = ({ field, children, align = 'left', className = '' }) => (
-    <th className={`text-${align} px-4 py-3 ${className}`}>
+  const ThSortable = ({ field, children, className = '' }) => (
+    <th className={`text-left px-4 py-3 ${className}`}>
       <button
         type="button"
         onClick={() => onSortChange?.(field, sort?.field === field && sort.direction === 'asc' ? 'desc' : 'asc')}
@@ -53,11 +49,9 @@ export default function ProductsTable({
   )
 
   return (
-    <Card padded={false} className="overflow-hidden">
-      {/* Estado de carga */}
+    <Card padded={false} className="overflow-visible">
       {loading && <ProductsTableSkeleton rows={5} />}
 
-      {/* Estado vacío por búsqueda */}
       {!loading && !hasItems && searchQuery && (
         <EmptyState
           icon={PackageX}
@@ -74,7 +68,6 @@ export default function ProductsTable({
         />
       )}
 
-      {/* Estado vacío sin productos */}
       {!loading && !hasItems && !searchQuery && (
         <EmptyState
           icon={Package}
@@ -91,7 +84,6 @@ export default function ProductsTable({
         />
       )}
 
-      {/* Tabla */}
       {!loading && hasItems && (
         <>
           <div className="overflow-x-auto">
@@ -157,7 +149,6 @@ export default function ProductsTable({
                         />
                       </td>
 
-                      {/* Producto */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-dark-surface overflow-hidden shrink-0 flex items-center justify-center">
@@ -220,7 +211,6 @@ export default function ProductsTable({
             </table>
           </div>
 
-          {/* Paginación */}
           <ProductsPagination
             page={page}
             perPage={perPage}

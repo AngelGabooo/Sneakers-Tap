@@ -1,3 +1,4 @@
+// src/pages/SaleDetail.jsx
 import { useEffect, useState } from 'react'
 import { Receipt } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -21,11 +22,14 @@ import SaleDetailCancelModal from '../components/sales/detail/SaleDetailCancelMo
 import SaleDetailSkeleton from '../components/sales/detail/SaleDetailSkeleton'
 import PosTicketModal from '../components/pos/PosTicketModal'
 import { useView } from '../context/ViewContext'
+import { useAuth } from '../context/AuthContext'
 import { useSales } from '../context/SalesContext'
+import { notifySaleCancel } from '../utils/notifyAdmins'
 
 export default function SaleDetail() {
   const { navigate, viewParams } = useView()
-  const { getSaleById, updateSale } = useSales()
+  const { user } = useAuth()
+  const { getSaleById, cancelSale } = useSales()
 
   const saleId = viewParams?.id
   const sale = saleId ? getSaleById(saleId) : null
@@ -76,10 +80,7 @@ export default function SaleDetail() {
   }
 
   const handleViewAudit = () => {
-    setToast({
-      title: 'Auditoría',
-      description: 'Función pendiente: conectar con Vista #31.',
-    })
+    if (sale) navigate('audit', { entity: sale.folio })
   }
 
   const handleViewProduct = (productId) => {
@@ -91,25 +92,31 @@ export default function SaleDetail() {
   }
 
   const handleViewCash = () => {
-    console.log('Ver caja')
+    navigate('cash-current')
   }
 
   const handleViewMovements = () => {
     navigate('inventory-movements', { productId: sale?.items?.[0]?.productId })
   }
 
-  const handleConfirmCancel = ({ reason, notes }) => {
+  const handleConfirmCancel = async ({ reason, notes }) => {
     if (!sale) return
     setSubmitting(true)
 
-    // 🚧 TODO: en backend será POST /api/sales/:id/cancel
-    setTimeout(() => {
-      updateSale(sale.id, {
-        status: 'cancelled',
-        cancelReason: reason,
-        cancelNotes: notes,
-        cancelledAt: new Date().toISOString(),
-        cancelledBy: 'Henry Sneakers',
+    try {
+      // ✅ await
+      await cancelSale(sale.id, {
+        reason,
+        notes,
+        cancelledBy: user?.name || 'Usuario',
+      })
+
+      // 🔔 Notificar a los administradores
+      notifySaleCancel({
+        sale,
+        actorName: user?.name || 'Usuario',
+        actorRole: user?.role || 'Vendedor',
+        reason: reason || notes || 'Sin motivo registrado',
       })
 
       setSubmitting(false)
@@ -118,7 +125,14 @@ export default function SaleDetail() {
         title: 'Venta cancelada',
         description: 'El estado de la venta fue actualizado.',
       })
-    }, 600)
+    } catch (err) {
+      console.error('❌ Error cancelando venta:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al cancelar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   return (
@@ -163,7 +177,6 @@ export default function SaleDetail() {
           <SaleDetailStats sale={sale} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Columna principal */}
             <div className="lg:col-span-2 space-y-5">
               <SaleDetailItems sale={sale} onViewProduct={handleViewProduct} />
               <SaleDetailSummary sale={sale} />
@@ -172,7 +185,6 @@ export default function SaleDetail() {
               <SaleDetailAudit sale={sale} onViewAudit={handleViewAudit} />
             </div>
 
-            {/* Panel lateral */}
             <aside className="lg:col-span-1 space-y-5 lg:sticky lg:top-20 lg:self-start">
               <SaleDetailInfo sale={sale} />
               <SaleDetailCustomer sale={sale} onViewCustomer={handleViewCustomer} />
@@ -206,7 +218,7 @@ export default function SaleDetail() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

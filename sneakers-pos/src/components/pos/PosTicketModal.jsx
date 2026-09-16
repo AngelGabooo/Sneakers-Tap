@@ -15,7 +15,6 @@ export default function PosTicketModal({
   const { settings } = useSettings()
   const { store, ticket } = settings
 
-  // Ancho por defecto: el configurado en #32, o el prop, o 80
   const defaultWidth = width || ticket.width || 80
   const [paperWidth, setPaperWidth] = useState(defaultWidth)
   const [printing, setPrinting] = useState(false)
@@ -28,20 +27,18 @@ export default function PosTicketModal({
   if (!open || !sale) return null
 
   // -----------------------------------------------------------
-  // Datos de la tienda (con fallbacks para que nunca se vea vacío)
+  // Datos de la tienda
   // -----------------------------------------------------------
-  const storeName = ticket.header.name || store.commercialName || 'SNEAKERS'
+  const storeName    = ticket.header.name || store.commercialName || ''
   const storeTagline = ticket.header.tagline || ''
-  const showLogo = ticket.header.showLogo && store.logoUrl
-  const showAddress = ticket.header.showAddress && store.address?.street
-  const showPhone = ticket.header.showPhone && store.phone
-  const showEmail = ticket.header.showEmail && store.email
-  const showRfc = ticket.header.showRfc && store.rfc
+  const showLogo     = ticket.header.showLogo && store.logoUrl
+  const showAddress  = ticket.header.showAddress && store.address?.street
+  const showPhone    = ticket.header.showPhone && store.phone
+  const showEmail    = ticket.header.showEmail && store.email
+  const showRfc      = ticket.header.showRfc && store.rfc
 
-  const addressLine = [
-    store.address?.street,
-    store.address?.exteriorNumber,
-  ].filter(Boolean).join(' ')
+  const addressLine = [store.address?.street, store.address?.exteriorNumber]
+    .filter(Boolean).join(' ')
 
   const cityLine = [
     store.address?.neighborhood,
@@ -55,12 +52,58 @@ export default function PosTicketModal({
   ].filter(Boolean).join(' · ')
 
   // -----------------------------------------------------------
+  // Helper: arma el payload con datos configurables
+  // -----------------------------------------------------------
+  const buildPayload = () => {
+    const buildAddress = () => {
+      if (!ticket.header.showAddress) return null
+      const parts = [
+        store.address?.street,
+        store.address?.exteriorNumber,
+        store.address?.neighborhood,
+        store.address?.city,
+        store.address?.state,
+        store.address?.postalCode,
+      ].filter(Boolean)
+      return parts.length ? parts.join(', ') : null
+    }
+
+    return {
+      ...sale,
+      ticketHeader: {
+        name:    storeName || null,
+        tagline: storeTagline || null,
+        address: buildAddress(),
+        phone:   ticket.header.showPhone ? store.phone || null : null,
+        email:   ticket.header.showEmail ? store.email || null : null,
+        rfc:     ticket.header.showRfc   ? store.rfc   || null : null,
+      },
+      ticketOptions: {
+        showNumber:         ticket.sale.showNumber,
+        showDate:           ticket.sale.showDate,
+        showTime:           ticket.sale.showTime,
+        showSeller:         ticket.sale.showSeller,
+        showCash:           ticket.sale.showCash,
+        showBranch:         ticket.sale.showBranch,
+        showCustomer:       ticket.sale.showCustomer,
+        showPaymentMethod:  ticket.sale.showPaymentMethod,
+      },
+      ticketFooter: {
+        thankYouMessage: ticket.footer.showThankYou    ? ticket.footer.thankYouMessage || null : null,
+        returnPolicy:    ticket.footer.showReturnPolicy ? ticket.footer.returnPolicy   || null : null,
+        website:         ticket.footer.showWebsite      ? store.website || null : null,
+        name:            storeName || null,
+      },
+    }
+  }
+
+  // -----------------------------------------------------------
   // Imprimir
   // -----------------------------------------------------------
   const handlePrint = async () => {
     setPrinting(true)
     try {
-      const result = await printReceipt(sale)
+      const result = await printReceipt(buildPayload())
       if (result.ok) {
         setPrinting(false)
         return
@@ -191,12 +234,14 @@ export default function PosTicketModal({
         {/* Preview */}
         <div className="flex-1 overflow-y-auto p-4 bg-gray-100 dark:bg-dark-surface flex justify-center">
           <div ref={printRef} style={ticketStyles.container}>
-            {/* Header desde #32 */}
+            {/* Header */}
             <div style={ticketStyles.header}>
               {showLogo && (
                 <img src={store.logoUrl} alt="Logo" style={ticketStyles.logoImg} />
               )}
-              <div style={ticketStyles.logo}>{storeName}</div>
+              {storeName && (
+                <div style={ticketStyles.logo}>{storeName}</div>
+              )}
               {storeTagline && (
                 <div style={ticketStyles.tagline}>{storeTagline}</div>
               )}
@@ -220,7 +265,7 @@ export default function PosTicketModal({
 
             <div style={ticketStyles.divider} />
 
-            {/* Meta de venta */}
+            {/* Meta */}
             <div style={ticketStyles.meta}>
               {ticket.sale.showNumber && (
                 <div style={ticketStyles.metaRow}>
@@ -231,7 +276,18 @@ export default function PosTicketModal({
               {ticket.sale.showDate && (
                 <div style={ticketStyles.metaRow}>
                   <span>Fecha:</span>
-                  <span>{new Date(sale.createdAt).toLocaleString('es-MX')}</span>
+                  <span>{new Date(sale.createdAt).toLocaleDateString('es-MX')}</span>
+                </div>
+              )}
+              {ticket.sale.showTime && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Hora:</span>
+                  <span>
+                    {new Date(sale.createdAt).toLocaleTimeString('es-MX', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                 </div>
               )}
               {ticket.sale.showSeller && (
@@ -240,22 +296,22 @@ export default function PosTicketModal({
                   <span>{sale.cashier}</span>
                 </div>
               )}
-              {ticket.sale.showCustomer && (
-                <div style={ticketStyles.metaRow}>
-                  <span>Cliente:</span>
-                  <span>{sale.customerName || 'Venta general'}</span>
-                </div>
-              )}
-              {ticket.sale.showCash && sale.cashLabel && (
+              {ticket.sale.showCash && sale.cashId && (
                 <div style={ticketStyles.metaRow}>
                   <span>Caja:</span>
-                  <span>{sale.cashLabel}</span>
+                  <span>{sale.cashId}</span>
                 </div>
               )}
               {ticket.sale.showBranch && sale.branch && (
                 <div style={ticketStyles.metaRow}>
                   <span>Sucursal:</span>
                   <span>{sale.branch}</span>
+                </div>
+              )}
+              {ticket.sale.showCustomer && (
+                <div style={ticketStyles.metaRow}>
+                  <span>Cliente:</span>
+                  <span>{sale.customerName || 'Venta general'}</span>
                 </div>
               )}
             </div>
@@ -269,12 +325,14 @@ export default function PosTicketModal({
                   {ticket.products.showName && (
                     <div style={ticketStyles.itemName}>{item.productName}</div>
                   )}
-                  <div style={ticketStyles.itemMeta}>
-                    {[
-                      ticket.products.showSize ? item.size : null,
-                      ticket.products.showColor ? item.color : null,
-                    ].filter(Boolean).join(' · ')}
-                  </div>
+                  {ticket.products.showSize || ticket.products.showColor ? (
+                    <div style={ticketStyles.itemMeta}>
+                      {[
+                        ticket.products.showSize ? item.size : null,
+                        ticket.products.showColor ? item.color : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  ) : null}
                   {ticket.products.showSku && item.sku && (
                     <div style={ticketStyles.itemMeta}>SKU: {item.sku}</div>
                   )}
@@ -339,7 +397,7 @@ export default function PosTicketModal({
 
             <div style={ticketStyles.divider} />
 
-            {/* Footer desde #32 */}
+            {/* Footer */}
             <div style={ticketStyles.footer}>
               {ticket.footer.showThankYou && ticket.footer.thankYouMessage && (
                 <div style={{ ...ticketStyles.bold, marginBottom: '1mm' }}>
@@ -368,7 +426,7 @@ export default function PosTicketModal({
                   />
                 </div>
               )}
-              {!ticket.footer.showThankYou && !ticket.footer.showReturnPolicy && (
+              {!ticket.footer.showThankYou && !ticket.footer.showReturnPolicy && storeName && (
                 <div style={ticketStyles.bold}>*** {storeName} ***</div>
               )}
             </div>

@@ -1,8 +1,21 @@
+// src/components/cash/open/CashOpenSuccessModal.jsx
 import { CheckCircle2, Wallet, ShoppingCart } from 'lucide-react'
 import Button from '../../common/Button'
 
 export default function CashOpenSuccessModal({ open, session, onGoToCash, onGoToPos }) {
   if (!open || !session) return null
+
+  const cashLabel = session.cashLabel || session.cash_label || 'Caja'
+  const initialFund = Number(session.initialFund ?? session.initial_fund) || 0
+  const responsibleName = session.responsibleName || session.responsible_name || '—'
+  const openedAt = session.openedAt || session.opened_at
+
+  const dateLabel = openedAt
+    ? new Date(openedAt).toLocaleString('es-MX', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      })
+    : '—'
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -15,14 +28,18 @@ export default function CashOpenSuccessModal({ open, session, onGoToCash, onGoTo
             Caja abierta correctamente
           </h3>
           <p className="text-sm text-gray-500 dark:text-dark-muted mt-2">
-            La {session.cashLabel} está lista para comenzar operaciones.
+            La {cashLabel} está lista para comenzar operaciones.
           </p>
 
           <div className="mt-4 space-y-1.5 text-sm">
-            <Row label="Sesión" value={session.id} mono />
-            <Row label="Fondo inicial" value={`$${Number(session.initialFund).toLocaleString('es-MX')}`} emphasis />
-            <Row label="Responsable" value={session.responsibleName} />
-            <Row label="Fecha" value={new Date(session.openedAt).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })} />
+            <Row label="Sesión" value={session.id || '—'} mono />
+            <Row
+              label="Fondo inicial"
+              value={`$${initialFund.toLocaleString('es-MX')}`}
+              emphasis
+            />
+            <Row label="Responsable" value={responsibleName} />
+            <Row label="Fecha" value={dateLabel} />
           </div>
         </div>
 

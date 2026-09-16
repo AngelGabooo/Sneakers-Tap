@@ -1,4 +1,5 @@
-import { Plus, X, Tags, Info, Boxes, Wand2, Printer } from 'lucide-react'
+// src/components/products/ProductVariantsSection.jsx
+import { Plus, X, Tags, Info, Boxes, Wand2, Printer, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import Card from '../common/Card'
 import Button from '../common/Button'
@@ -47,45 +48,97 @@ export function buildVariantBarcode(sku) {
 }
 
 export default function ProductVariantsSection({
-  sizes = [],
-  colors = [],
-  variants = [],
+  variantsBySize = {},           // 👈 NUEVO modelo: { '25': ['Negro'], '26': ['Negro','Blanco'] }
+  variants = [],                 // array plano final (para imprimir, guardar, etc.)
   baseSku = '',
   codeType = 'barcode',
   productName = '',
   productPrice = '',
-  onChangeSizes,
-  onChangeColors,
-  onChangeVariantsBulk,
+  onChangeVariantsBySize,        // 👈 NUEVO handler
+  onChangeVariantsBulk,          // sigue igual: recibe un array nuevo
 }) {
   const [newSize, setNewSize] = useState('')
   const [printOpen, setPrintOpen] = useState(false)
 
-  // ---- Tallas ----
-  const toggleSize = (s) => {
-    const next = sizes.includes(s) ? sizes.filter((x) => x !== s) : [...sizes, s]
-    onChangeSizes?.(next)
+  const sizes = Object.keys(variantsBySize)
+
+  // -------------------------------------------------------------
+  // Tallas
+  // -------------------------------------------------------------
+  const addSize = (size) => {
+    if (!size || variantsBySize[size]) return
+    onChangeVariantsBySize?.({
+      ...variantsBySize,
+      [size]: [],   // talla nueva sin colores asignados
+    })
+  }
+
+  const toggleSizeOption = (size) => {
+    if (variantsBySize[size]) {
+      // Eliminar talla completa
+      const next = { ...variantsBySize }
+      delete next[size]
+      onChangeVariantsBySize?.(next)
+    } else {
+      addSize(size)
+    }
   }
 
   const addCustomSize = () => {
     const v = newSize.trim()
-    if (!v || sizes.includes(v)) return
-    onChangeSizes?.([...sizes, v])
+    if (!v || variantsBySize[v]) return
+    addSize(v)
     setNewSize('')
   }
 
-  // ---- Colores ----
-  const toggleColor = (c) => {
-    const next = colors.includes(c) ? colors.filter((x) => x !== c) : [...colors, c]
-    onChangeColors?.(next)
+  const removeSize = (size) => {
+    const next = { ...variantsBySize }
+    delete next[size]
+    onChangeVariantsBySize?.(next)
   }
 
-  // ---- Stock masivo por talla ----
+  // -------------------------------------------------------------
+  // Colores por talla
+  // -------------------------------------------------------------
+  const toggleColorInSize = (size, color) => {
+    const current = variantsBySize[size] || []
+    const nextColors = current.includes(color)
+      ? current.filter((c) => c !== color)
+      : [...current, color]
+    onChangeVariantsBySize?.({
+      ...variantsBySize,
+      [size]: nextColors,
+    })
+  }
+
+  const setAllColorsForSize = (size, colorsList) => {
+    onChangeVariantsBySize?.({
+      ...variantsBySize,
+      [size]: colorsList,
+    })
+  }
+
+  // -------------------------------------------------------------
+  // Stock
+  // -------------------------------------------------------------
+  // Stock "compartido" por talla (solo si todos los colores de la talla tienen el mismo stock)
+  const stockBySize = {}
+  sizes.forEach((size) => {
+    const colorsInSize = variantsBySize[size] || []
+    const group = variants.filter((v) => v.size === size && colorsInSize.includes(v.color))
+    if (group.length === 0) { stockBySize[size] = ''; return }
+    const first = Number(group[0].stock) || 0
+    stockBySize[size] = group.every((v) => (Number(v.stock) || 0) === first) ? first : ''
+  })
+
   const handleBulkStockBySize = (size, value) => {
     if (!onChangeVariantsBulk) return
     const num = Math.max(0, Number(value) || 0)
+    const colorsInSize = variantsBySize[size] || []
     onChangeVariantsBulk((list) =>
-      list.map((v) => (v.size === size ? { ...v, stock: num } : v)),
+      list.map((v) =>
+        v.size === size && colorsInSize.includes(v.color) ? { ...v, stock: num } : v,
+      ),
     )
   }
 
@@ -97,7 +150,9 @@ export default function ProductVariantsSection({
     )
   }
 
-  // ---- Regenerar códigos ----
+  // -------------------------------------------------------------
+  // Regenerar códigos
+  // -------------------------------------------------------------
   const regenerateVariantCodes = (variant) => {
     if (!onChangeVariantsBulk) return
     const sku = buildVariantSku(baseSku, variant.size, variant.color)
@@ -117,15 +172,6 @@ export default function ProductVariantsSection({
     )
   }
 
-  // Stock "compartido" por talla
-  const stockBySize = {}
-  sizes.forEach((size) => {
-    const group = variants.filter((v) => v.size === size)
-    if (group.length === 0) { stockBySize[size] = 0; return }
-    const first = Number(group[0].stock) || 0
-    stockBySize[size] = group.every((v) => (Number(v.stock) || 0) === first) ? first : ''
-  })
-
   const totalStock = variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
 
   return (
@@ -136,7 +182,7 @@ export default function ProductVariantsSection({
             Variantes del producto
           </h2>
           <p className="text-sm text-gray-500 dark:text-dark-muted mt-0.5">
-            Selecciona varias tallas y colores. Cada combinación genera su propio SKU y código únicos.
+            Agrega tallas y asígnales sus colores. Cada combinación genera su propio SKU y código.
           </p>
         </header>
 
@@ -154,47 +200,29 @@ export default function ProductVariantsSection({
           </div>
         )}
 
-        {/* Tallas */}
+        {/* Tallas — solo para añadir */}
         <div className="mb-5">
           <p className="text-sm font-medium text-brand-black dark:text-dark-text mb-2">
-            Tallas
+            Agregar tallas
           </p>
           <div className="flex flex-wrap gap-2">
-            {SIZE_OPTIONS.map((s) => {
-              const active = sizes.includes(s)
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={!baseSku}
-                  onClick={() => toggleSize(s)}
-                  className={`
-                    h-9 min-w-[44px] px-3 rounded-lg text-sm font-medium border
-                    transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-                    ${active
-                      ? 'bg-brand-blue text-white border-brand-blue'
-                      : 'bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted border-gray-200 dark:border-dark-border hover:border-brand-blue hover:text-brand-blue'}
-                  `}
-                >
-                  {s}
-                </button>
-              )
-            })}
-
-            {sizes.filter((s) => !SIZE_OPTIONS.includes(s)).map((s) => (
-              <span
+            {SIZE_OPTIONS.filter((s) => !variantsBySize[s]).map((s) => (
+              <button
                 key={s}
-                className="inline-flex items-center gap-1 h-9 px-3 rounded-lg text-sm font-medium bg-brand-blue text-white border border-brand-blue"
+                type="button"
+                disabled={!baseSku}
+                onClick={() => toggleSizeOption(s)}
+                className="
+                  h-9 min-w-[44px] px-3 rounded-lg text-sm font-medium border
+                  bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted
+                  border-gray-200 dark:border-dark-border
+                  hover:border-brand-blue hover:text-brand-blue
+                  disabled:opacity-40 disabled:cursor-not-allowed
+                  transition-colors
+                "
               >
-                {s}
-                <button
-                  onClick={() => toggleSize(s)}
-                  className="hover:bg-white/20 rounded p-0.5"
-                  aria-label={`Quitar talla ${s}`}
-                >
-                  <X size={12} strokeWidth={2.5} />
-                </button>
-              </span>
+                + {s}
+              </button>
             ))}
           </div>
 
@@ -205,55 +233,107 @@ export default function ProductVariantsSection({
               onChange={(e) => setNewSize(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustomSize())}
               placeholder="Agregar talla (ej. 31)"
+              disabled={!baseSku}
               className="
                 flex-1 h-9 px-3 rounded-lg text-sm
                 bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
                 border border-gray-200 dark:border-dark-border
                 focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
-                outline-none
+                outline-none disabled:opacity-40
               "
             />
-            <Button size="sm" variant="secondary" icon={Plus} onClick={addCustomSize}>
+            <Button size="sm" variant="secondary" icon={Plus} onClick={addCustomSize} disabled={!baseSku}>
               Agregar
             </Button>
           </div>
         </div>
 
-        {/* Colores */}
-        <div className="mb-5">
-          <p className="text-sm font-medium text-brand-black dark:text-dark-text mb-2">
-            Colores
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {COLOR_OPTIONS.map((c) => {
-              const active = colors.includes(c)
+        {/* Bloque por talla con sus colores */}
+        {sizes.length > 0 && (
+          <div className="mb-5 space-y-3">
+            <p className="text-sm font-medium text-brand-black dark:text-dark-text">
+              Colores por talla
+            </p>
+
+            {sizes.map((size) => {
+              const colorsInSize = variantsBySize[size] || []
               return (
-                <button
-                  key={c}
-                  type="button"
-                  disabled={!baseSku}
-                  onClick={() => toggleColor(c)}
-                  className={`
-                    inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium border
-                    transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-                    ${active
-                      ? 'bg-brand-blue text-white border-brand-blue'
-                      : 'bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted border-gray-200 dark:border-dark-border hover:border-brand-blue hover:text-brand-blue'}
-                  `}
+                <div
+                  key={size}
+                  className="rounded-lg border border-gray-200 dark:border-dark-border p-4 bg-gray-50/50 dark:bg-dark-surface/40"
                 >
-                  <span
-                    className="w-3.5 h-3.5 rounded-full border border-black/10"
-                    style={{ backgroundColor: COLOR_MAP[c] || '#ccc' }}
-                  />
-                  {c}
-                </button>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center justify-center h-8 min-w-[44px] px-3 rounded-md bg-brand-blue text-white text-sm font-bold">
+                        {size}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-dark-muted">
+                        {colorsInSize.length === 0
+                          ? 'Sin colores — agrega al menos uno'
+                          : `${colorsInSize.length} color${colorsInSize.length > 1 ? 'es' : ''}`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAllColorsForSize(size, [...COLOR_OPTIONS])}
+                        className="text-xs font-medium text-brand-blue hover:underline"
+                      >
+                        Todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAllColorsForSize(size, [])}
+                        className="text-xs font-medium text-gray-500 dark:text-dark-muted hover:underline"
+                      >
+                        Ninguno
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeSize(size)}
+                        className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-red hover:underline"
+                      >
+                        <Trash2 size={12} />
+                        Quitar talla
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {COLOR_OPTIONS.map((c) => {
+                      const active = colorsInSize.includes(c)
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          disabled={!baseSku}
+                          onClick={() => toggleColorInSize(size, c)}
+                          className={`
+                            inline-flex items-center gap-2 h-8 px-3 rounded-lg text-xs font-medium border
+                            transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+                            ${active
+                              ? 'bg-brand-blue text-white border-brand-blue'
+                              : 'bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted border-gray-200 dark:border-dark-border hover:border-brand-blue hover:text-brand-blue'}
+                          `}
+                        >
+                          <span
+                            className="w-3 h-3 rounded-full border border-black/10"
+                            style={{ backgroundColor: COLOR_MAP[c] || '#ccc' }}
+                          />
+                          {c}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               )
             })}
           </div>
-        </div>
+        )}
 
         {/* Stock masivo por talla */}
-        {sizes.length > 0 && colors.length > 0 && (
+        {sizes.some((s) => (variantsBySize[s] || []).length > 0) && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
               <Boxes size={15} className="text-brand-blue" strokeWidth={2} />
@@ -262,35 +342,37 @@ export default function ProductVariantsSection({
               </p>
             </div>
             <p className="text-xs text-gray-500 dark:text-dark-muted mb-3">
-              Escribe los pares por talla. Se aplicará a todos los colores seleccionados.
+              Escribe los pares por talla. Se aplicará a <strong>todos los colores</strong> de esa talla.
             </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {sizes.map((s) => (
-                <div
-                  key={s}
-                  className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 dark:border-dark-border bg-gray-50/50 dark:bg-dark-surface/40"
-                >
-                  <span className="inline-flex items-center justify-center h-9 min-w-[44px] px-2 rounded-md bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border text-sm font-semibold text-brand-black dark:text-dark-text">
-                    {s}
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={stockBySize[s] ?? ''}
-                    onChange={(e) => handleBulkStockBySize(s, e.target.value)}
-                    placeholder="0"
-                    className="
-                      flex-1 h-9 px-2 rounded-md text-sm text-center font-semibold
-                      bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
-                      border border-gray-200 dark:border-dark-border
-                      focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
-                      outline-none
-                    "
-                  />
-                  <span className="text-xs text-gray-400 dark:text-dark-muted shrink-0">pares</span>
-                </div>
-              ))}
+              {sizes
+                .filter((s) => (variantsBySize[s] || []).length > 0)
+                .map((s) => (
+                  <div
+                    key={s}
+                    className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 dark:border-dark-border bg-gray-50/50 dark:bg-dark-surface/40"
+                  >
+                    <span className="inline-flex items-center justify-center h-9 min-w-[44px] px-2 rounded-md bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border text-sm font-semibold text-brand-black dark:text-dark-text">
+                      {s}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={stockBySize[s] ?? ''}
+                      onChange={(e) => handleBulkStockBySize(s, e.target.value)}
+                      placeholder="0"
+                      className="
+                        flex-1 h-9 px-2 rounded-md text-sm text-center font-semibold
+                        bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
+                        border border-gray-200 dark:border-dark-border
+                        focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                        outline-none
+                      "
+                    />
+                    <span className="text-xs text-gray-400 dark:text-dark-muted shrink-0">pares</span>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -337,7 +419,7 @@ export default function ProductVariantsSection({
 
           {variants.length === 0 ? (
             <p className="text-sm text-gray-500 dark:text-dark-muted py-4">
-              Selecciona tallas y colores para generar las variantes.
+              Agrega tallas y asígnales colores para generar las variantes.
             </p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-gray-100 dark:border-dark-border">

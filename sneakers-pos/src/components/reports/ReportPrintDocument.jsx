@@ -1,10 +1,7 @@
+// src/components/reports/ReportPrintDocument.jsx
 import { forwardRef } from 'react'
+import { useSettings } from '../../context/SettingsContext'
 
-/**
- * Documento imprimible del reporte.
- * Se renderiza tal cual en el PDF/impresión.
- * ⚠️ No usa Tailwind dark: — el PDF siempre es blanco con texto negro.
- */
 const ReportPrintDocument = forwardRef(function ReportPrintDocument(
   {
     categoryLabel,
@@ -20,18 +17,30 @@ const ReportPrintDocument = forwardRef(function ReportPrintDocument(
   },
   ref,
 ) {
-  const fmtMoney = (n) =>
-    `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 })}`
+  const { settings } = useSettings()
+  const { store, ticket } = settings
 
-  const isMoney = (key) =>
-    ['value', 'revenue', 'total', 'amount', 'profit', 'cost', 'netSales', 'expected', 'counted'].includes(key)
+  // Datos de la tienda con fallbacks limpios
+  const storeName    = ticket.header.name || store.commercialName || ''
+  const storeTagline = ticket.header.tagline || ''
+  const storeAddress = [
+    store.address?.street,
+    store.address?.exteriorNumber,
+    store.address?.neighborhood,
+    store.address?.city,
+    store.address?.state,
+  ].filter(Boolean).join(', ')
+  const storePhone = store.phone || ''
+  const storeRfc   = store.rfc || ''
+
+  const is58 = ticket.width === 58
 
   return (
     <div
       ref={ref}
       style={{
-        width: '210mm',        // A4 ancho
-        minHeight: '297mm',    // A4 alto
+        width: '210mm',
+        minHeight: '297mm',
         margin: '0 auto',
         padding: '12mm 14mm',
         backgroundColor: '#ffffff',
@@ -45,18 +54,49 @@ const ReportPrintDocument = forwardRef(function ReportPrintDocument(
       {/* ======================= ENCABEZADO ======================= */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '12px', borderBottom: '2px solid #2563EB' }}>
         <div>
-          <div style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '0.5px', color: '#2563EB' }}>
-            SNEAKERS
-          </div>
-          <div style={{ fontSize: '10px', color: '#6B7280', marginTop: '2px' }}>
-            Tenis · Bolsas · Mochilas · Accesorios
-          </div>
-          <div style={{ fontSize: '10px', color: '#6B7280' }}>
-            Av. Principal 123, Col. Centro · CDMX · Tel: 55 1234 5678
-          </div>
-          <div style={{ fontSize: '10px', color: '#6B7280' }}>
-            RFC: SNK240101ABC
-          </div>
+          {/* Logo opcional */}
+          {ticket.header.showLogo && store.logoUrl && (
+            <img
+              src={store.logoUrl}
+              alt="Logo"
+              style={{ maxHeight: '60px', maxWidth: '180px', marginBottom: '6px' }}
+            />
+          )}
+
+          {/* Nombre de la tienda (SOLO si está configurado) */}
+          {storeName && (
+            <div style={{ fontSize: '22px', fontWeight: 800, letterSpacing: '0.5px', color: '#2563EB' }}>
+              {storeName}
+            </div>
+          )}
+
+          {/* Tagline (opcional) */}
+          {storeTagline && (
+            <div style={{ fontSize: '10px', color: '#6B7280', marginTop: '2px' }}>
+              {storeTagline}
+            </div>
+          )}
+
+          {/* Dirección (opcional) */}
+          {storeAddress && (
+            <div style={{ fontSize: '10px', color: '#6B7280' }}>
+              {storeAddress}
+            </div>
+          )}
+
+          {/* Teléfono (opcional) */}
+          {storePhone && (
+            <div style={{ fontSize: '10px', color: '#6B7280' }}>
+              Tel: {storePhone}
+            </div>
+          )}
+
+          {/* RFC (opcional) */}
+          {storeRfc && (
+            <div style={{ fontSize: '10px', color: '#6B7280' }}>
+              RFC: {storeRfc}
+            </div>
+          )}
         </div>
 
         <div style={{ textAlign: 'right' }}>
@@ -84,7 +124,6 @@ const ReportPrintDocument = forwardRef(function ReportPrintDocument(
           {reportTitle}
         </h1>
 
-        {/* Chips de filtros */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
           <Chip label="Periodo" value={periodLabel} />
           {filtersLabel && <Chip label="Filtros" value={filtersLabel} />}
@@ -239,7 +278,9 @@ const ReportPrintDocument = forwardRef(function ReportPrintDocument(
           justifyContent: 'space-between',
         }}
       >
-        <span>SNEAKERS POS · Reporte generado automáticamente</span>
+        <span>
+          {storeName ? `${storeName} · Reporte generado automáticamente` : 'Reporte generado automáticamente'}
+        </span>
         <span>{generatedAt.date} · {generatedAt.time}</span>
       </footer>
     </div>

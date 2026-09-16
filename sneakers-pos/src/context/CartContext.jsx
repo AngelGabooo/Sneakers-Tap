@@ -1,12 +1,64 @@
+// src/context/CartContext.jsx
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useAuth } from './AuthContext'
+import { storageKey, readSessionJSON, writeSessionJSON } from '../utils/sessionKey'
 
 const CartContext = createContext(null)
 
+const EMPTY_CART = {
+  items: [],
+  customer: null,
+  manualDiscount: null,
+  note: '',
+}
+
 export function CartProvider({ children }) {
+  const { user } = useAuth()
+  const userId = user?.id || null
+
   const [items, setItems] = useState([])
   const [customer, setCustomer] = useState(null)
-  const [manualDiscount, setManualDiscount] = useState(null) // descuento manual independiente
+  const [manualDiscount, setManualDiscount] = useState(null)
   const [note, setNote] = useState('')
+
+  // -------------------------------------------------------------
+  // Cargar carrito al cambiar de usuario
+  // Cada usuario tiene su propia clave en sessionStorage
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!userId) {
+      // Sin usuario → carrito vacío
+      setItems([])
+      setCustomer(null)
+      setManualDiscount(null)
+      setNote('')
+      return
+    }
+
+    const key = storageKey('cart', userId)
+    const saved = readSessionJSON(key)
+    if (saved) {
+      setItems(saved.items || [])
+      setCustomer(saved.customer || null)
+      setManualDiscount(saved.manualDiscount || null)
+      setNote(saved.note || '')
+    } else {
+      setItems([])
+      setCustomer(null)
+      setManualDiscount(null)
+      setNote('')
+    }
+  }, [userId])
+
+  // -------------------------------------------------------------
+  // Persistir el carrito automáticamente
+  // (solo si hay usuario)
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!userId) return
+    const key = storageKey('cart', userId)
+    writeSessionJSON(key, { items, customer, manualDiscount, note })
+  }, [userId, items, customer, manualDiscount, note])
 
   /**
    * Factor multiplicador del precio según el cliente mayorista.
@@ -81,17 +133,19 @@ export function CartProvider({ children }) {
     setCustomer(null)
     setManualDiscount(null)
     setNote('')
-  }, [])
+    if (userId) {
+      const key = storageKey('cart', userId)
+      writeSessionJSON(key, EMPTY_CART)
+    }
+  }, [userId])
 
   // Totales
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, i) => acc + (i.basePrice || 0) * i.quantity, 0)
     const discounted = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
 
-    // Descuento total (incluye el del mayorista)
     const wholesaleDiscountAmount = subtotal - discounted
 
-    // Descuento manual adicional (opcional, si algún día lo agregas)
     let extraDiscount = 0
     if (manualDiscount?.scope === 'cart') {
       extraDiscount = manualDiscount.type === 'percent'
@@ -100,7 +154,7 @@ export function CartProvider({ children }) {
     }
 
     const total = Math.max(0, discounted - extraDiscount)
-    const tax = 0 // 🚧 conectar con IVA cuando aplique
+    const tax = 0
 
     return {
       subtotal,

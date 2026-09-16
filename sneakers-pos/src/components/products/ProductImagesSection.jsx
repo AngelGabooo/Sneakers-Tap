@@ -1,58 +1,77 @@
+// src/components/products/ProductImagesSection.jsx
 import { useRef } from 'react'
-import { UploadCloud, Star, Trash2, ImageIcon } from 'lucide-react'
+import { UploadCloud, Star, Trash2, ImageIcon, Loader2 } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
 
-export default function ProductImagesSection({ images = [], onChange }) {
+export default function ProductImagesSection({ images = [], onChange, uploading = false }) {
   const inputRef = useRef(null)
 
   const handleFiles = (files) => {
     const list = Array.from(files).map((file) => ({
       id: `${file.name}-${Date.now()}-${Math.random()}`,
-      file,
-      url: URL.createObjectURL(file),
-      isPrimary: false,
+      file,                                        // ← archivo pendiente de subir
+      url: URL.createObjectURL(file),              // ← preview local
+      isPrimary: images.length === 0 && list_lenght_check(images),
     }))
     onChange?.([...images, ...list])
   }
 
+  // Helper para determinar si es la primera imagen
+  function list_lenght_check(currentImages) {
+    return currentImages.length === 0
+  }
+
   const handleDrop = (e) => {
     e.preventDefault()
+    if (uploading) return
     handleFiles(e.dataTransfer.files)
   }
 
   const handleRemove = (id) => {
+    if (uploading) return
     onChange?.(images.filter((img) => img.id !== id))
   }
 
   const handleSetPrimary = (id) => {
+    if (uploading) return
     onChange?.(images.map((img) => ({ ...img, isPrimary: img.id === id })))
   }
 
   return (
     <Card>
-      <header className="mb-5">
-        <h2 className="text-base lg:text-lg font-semibold text-brand-black dark:text-dark-text">
-          Imágenes del producto
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-dark-muted mt-0.5">
-          Agrega fotografías para identificar fácilmente el producto.
-        </p>
+      <header className="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base lg:text-lg font-semibold text-brand-black dark:text-dark-text">
+            Imágenes del producto
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-dark-muted mt-0.5">
+            Agrega fotografías para identificar fácilmente el producto.
+          </p>
+        </div>
+        {uploading && (
+          <div className="flex items-center gap-1.5 text-xs font-medium text-brand-blue">
+            <Loader2 size={13} className="animate-spin" />
+            Subiendo…
+          </div>
+        )}
       </header>
 
       {/* Zona de drop */}
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        className="
+        onClick={() => !uploading && inputRef.current?.click()}
+        className={`
           flex flex-col items-center justify-center text-center
-          px-6 py-10 rounded-xl border-2 border-dashed cursor-pointer
+          px-6 py-10 rounded-xl border-2 border-dashed
           border-gray-200 dark:border-dark-border
           bg-gray-50/50 dark:bg-dark-card/40
-          hover:border-brand-blue hover:bg-blue-50/40 dark:hover:bg-blue-950/20
           transition-colors
-        "
+          ${uploading
+            ? 'cursor-not-allowed opacity-60'
+            : 'cursor-pointer hover:border-brand-blue hover:bg-blue-50/40 dark:hover:bg-blue-950/20'}
+        `}
       >
         <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center mb-3">
           <UploadCloud size={22} className="text-brand-blue" strokeWidth={1.9} />
@@ -72,6 +91,7 @@ export default function ProductImagesSection({ images = [], onChange }) {
           accept="image/png,image/jpeg,image/webp"
           multiple
           className="hidden"
+          disabled={uploading}
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
@@ -79,44 +99,55 @@ export default function ProductImagesSection({ images = [], onChange }) {
       {/* Previews */}
       {images.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 mt-5">
-          {images.map((img) => (
-            <div
-              key={img.id}
-              className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-surface"
-            >
-              <img src={img.url} alt="" className="w-full h-full object-cover" />
+          {images.map((img) => {
+            const isPending = !!img.file
+            return (
+              <div
+                key={img.id || img.url}
+                className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-surface"
+              >
+                <img src={img.url} alt="" className="w-full h-full object-cover" />
 
-              {img.isPrimary && (
-                <div className="absolute top-1.5 left-1.5">
-                  <Badge variant="success">Principal</Badge>
-                </div>
-              )}
+                {img.isPrimary && (
+                  <div className="absolute top-1.5 left-1.5">
+                    <Badge variant="success">Principal</Badge>
+                  </div>
+                )}
 
-              <div className="
-                absolute inset-0 flex items-center justify-center gap-1
-                bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity
-              ">
-                {!img.isPrimary && (
+                {isPending && (
+                  <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 text-[10px] font-semibold">
+                    Pendiente
+                  </div>
+                )}
+
+                <div className="
+                  absolute inset-0 flex items-center justify-center gap-1
+                  bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity
+                ">
+                  {!img.isPrimary && (
+                    <button
+                      type="button"
+                      onClick={() => handleSetPrimary(img.id || img.url)}
+                      disabled={uploading}
+                      className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-black transition-colors disabled:opacity-50"
+                      title="Marcar como principal"
+                    >
+                      <Star size={14} strokeWidth={2.2} />
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleSetPrimary(img.id)}
-                    className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-black transition-colors"
-                    title="Marcar como principal"
+                    onClick={() => handleRemove(img.id || img.url)}
+                    disabled={uploading}
+                    className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-red transition-colors disabled:opacity-50"
+                    title="Eliminar"
                   >
-                    <Star size={14} strokeWidth={2.2} />
+                    <Trash2 size={14} strokeWidth={2.2} />
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleRemove(img.id)}
-                  className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-red transition-colors"
-                  title="Eliminar"
-                >
-                  <Trash2 size={14} strokeWidth={2.2} />
-                </button>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

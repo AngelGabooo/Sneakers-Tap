@@ -1,7 +1,7 @@
 import express from 'express'
 import cors from 'cors'
-import { createPrinter, PRINTER_CONFIG } from './printer.js'
-import { openCashDrawer } from './cashdrawer.js'
+import { createPrinter, sendToPrinter, PRINTER_PORT, PRINTER_NAME } from './printer.js'
+import { getOpenDrawerBuffer } from './cashdrawer.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -16,7 +16,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     service: 'sneakers-print-server',
-    printer: PRINTER_CONFIG.interface,
+    printer: `${PRINTER_NAME} (${PRINTER_PORT})`,
     at: new Date().toISOString(),
   })
 })
@@ -26,24 +26,18 @@ app.get('/health', (req, res) => {
 // -------------------------------------------------------------
 app.post('/open-drawer', async (req, res) => {
   try {
-    const printer = createPrinter()
-
-    // Abre el cajón (algunas impresoras requieren enviar el pulso)
-    printer.openCashDrawer()
-
-    // Algunas GTP58B1 requieren "pulse" para ejecutar el comando
-    await printer.execute()
-
+    const buffer = getOpenDrawerBuffer(0) // pin 2
+    await sendToPrinter(buffer)
     console.log('✅ Cajón abierto desde el POS')
     res.json({ ok: true, action: 'open-drawer' })
   } catch (err) {
-    console.error('❌ Error al abrir el cajón:', err)
+    console.error('❌ Error al abrir el cajón:', err.message)
     res.status(500).json({ ok: false, error: err.message })
   }
 })
 
 // -------------------------------------------------------------
-// Imprimir ticket + abrir cajón
+// Imprimir ticket — TODOS los datos vienen del frontend
 // -------------------------------------------------------------
 app.post('/print-receipt', async (req, res) => {
   try {
@@ -52,27 +46,57 @@ app.post('/print-receipt', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Falta el objeto "sale"' })
     }
 
+    // DEBUG
+    console.log('📥 Datos recibidos del frontend:')
+    console.log(JSON.stringify({
+      folio: sale.folio,
+      payment: sale.payment,
+      itemsCount: (sale.items || []).length,
+      ticketHeader: sale.ticketHeader,
+      ticketOptions: sale.ticketOptions,
+      ticketFooter: sale.ticketFooter,
+    }, null, 2))
+
     const printer = createPrinter()
+
+    const header  = sale.ticketHeader  || {}
+    const options = sale.ticketOptions || {}
+    const footer  = sale.ticketFooter  || {}
 
     // -------- ENCABEZADO --------
     printer.alignCenter()
-    printer.bold(true)
-    printer.setTextSize(1, 1) // doble alto/ancho
-    printer.println('SNEAKERS')
-    printer.setTextSize(0, 0)
-    printer.bold(false)
-    printer.println('Tenis · Bolsas · Mochilas · Accesorios')
-    printer.println('Av. Principal 123, Col. Centro')
-    printer.println('CDMX · Tel: 55 1234 5678')
-    printer.println('RFC: SNK240101ABC')
+
+    if (header.name) {
+      printer.bold(true)
+      printer.setTextSize(1, 1)
+      printer.println(header.name)
+      printer.setTextSize(0, 0)
+      printer.bold(false)
+    }
+
+    if (header.tagline) printer.println(header.tagline)
+    if (header.address) printer.println(header.address)
+    if (header.phone)   printer.println(`Tel: ${header.phone}`)
+    if (header.email)   printer.println(header.email)
+    if (header.rfc)     printer.println(`RFC: ${header.rfc}`)
+
     printer.newLine()
 
     // -------- META --------
     printer.alignLeft()
-    printer.println(`Ticket: ${sale.folio}`)
-    printer.println(`Fecha:  ${new Date(sale.createdAt).toLocaleString('es-MX')}`)
-    printer.println(`Cajero: ${sale.cashier}`)
-    printer.println(`Cliente: ${sale.customerName || 'Venta general'}`)
+    if (options.showNumber)   printer.println(`Ticket:   ${sale.folio}`)
+    if (options.showDate) {
+      const d = new Date(sale.createdAt)
+      printer.println(`Fecha:    ${d.toLocaleDateString('es-MX')}`)
+    }
+    if (options.showTime) {
+      const d = new Date(sale.createdAt)
+      printer.println(`Hora:     ${d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}`)
+    }
+    if (options.showSeller)   printer.println(`Vendedor: ${sale.cashier}`)
+    if (options.showCash && sale.cashId)       printer.println(`Caja:     ${sale.cashId}`)
+    if (options.showBranch && sale.branch)     printer.println(`Sucursal: ${sale.branch}`)
+    if (options.showCustomer) printer.println(`Cliente:  ${sale.customerName || 'Venta general'}`)
     printer.drawLine()
 
     // -------- ITEMS --------
@@ -80,15 +104,13 @@ app.post('/print-receipt', async (req, res) => {
       printer.bold(true)
       printer.println(item.productName)
       printer.bold(false)
-      printer.println(`  ${item.variantLabel} · ${item.sku}`)
+      if (item.variantLabel || item.sku) {
+        printer.println(`  ${item.variantLabel || ''} - ${item.sku || ''}`)
+      }
       printer.alignLeft()
-      printer.println(
-        `  ${item.quantity} x $${Number(item.price).toLocaleString('es-MX')}`,
-      )
+      printer.println(`  ${item.quantity} x $${Number(item.price).toLocaleString('es-MX')}`)
       printer.alignRight()
-      printer.println(
-        `$${(item.quantity * item.price).toLocaleString('es-MX')}`,
-      )
+      printer.println(`$${(item.quantity * item.price).toLocaleString('es-MX')}`)
       printer.alignLeft()
     })
     printer.drawLine()
@@ -110,36 +132,49 @@ app.post('/print-receipt', async (req, res) => {
     printer.drawLine()
 
     // -------- PAGO --------
-    printer.println(`Método: ${sale.payment?.methodLabel || '—'}`)
+    // Calcular methodLabel en el server
+    const methodLabel = (() => {
+      const m = sale.payment?.method
+      const cardType = sale.payment?.cardType
+
+      if (m === 'cash')     return 'Efectivo'
+      if (m === 'card')     return `Tarjeta (${cardType === 'credit' ? 'Credito' : 'Debito'})`
+      if (m === 'transfer') return 'Transferencia'
+      if (m === 'digital')  return 'Pago digital'
+      if (m === 'other')    return 'Otro'
+      return sale.payment?.methodLabel || 'Otro'
+    })()
+
+    printer.println(`Metodo:   ${methodLabel}`)
+
     if (sale.payment?.method === 'cash') {
       printer.println(`Recibido: $${Number(sale.payment.cashReceived || 0).toLocaleString('es-MX')}`)
       printer.println(`Cambio:   $${Number(sale.payment.change || 0).toLocaleString('es-MX')}`)
     }
+
     if (sale.payment?.reference) {
-      printer.println(`Ref: ${sale.payment.reference}`)
+      printer.println(`Ref:      ${sale.payment.reference}`)
     }
 
     // -------- FOOTER --------
     printer.newLine()
     printer.alignCenter()
-    printer.println('¡Gracias por tu compra!')
-    printer.println('Conserva tu ticket para cambios y devoluciones.')
-    printer.println('*** SNEAKERS ***')
+    if (footer.thankYouMessage) printer.println(footer.thankYouMessage)
+    if (footer.returnPolicy)    printer.println(footer.returnPolicy)
+    if (footer.website)         printer.println(footer.website)
+    if (footer.name)            printer.println(`*** ${footer.name} ***`)
     printer.newLine()
     printer.newLine()
     printer.newLine()
 
-    // -------- ABRIR CAJÓN DESPUÉS DE IMPRIMIR --------
-    printer.openCashDrawer()
+    // -------- ENVIAR --------
+    const buffer = printer.getBuffer()
+    await sendToPrinter(buffer)
 
-    // -------- EJECUTAR --------
-    await printer.execute()
-    printer.clear()
-
-    console.log(`✅ Ticket impreso y cajón abierto · ${sale.folio}`)
+    console.log(`✅ Ticket impreso · ${sale.folio}`)
     res.json({ ok: true, action: 'print-receipt', folio: sale.folio })
   } catch (err) {
-    console.error('❌ Error al imprimir:', err)
+    console.error('❌ Error al imprimir:', err.message)
     res.status(500).json({ ok: false, error: err.message })
   }
 })
@@ -150,7 +185,7 @@ app.post('/print-receipt', async (req, res) => {
 app.listen(PORT, () => {
   console.log('🖨️  Sneakers Print Server')
   console.log(`   Corriendo en http://localhost:${PORT}`)
-  console.log(`   Impresora: ${PRINTER_CONFIG.interface}`)
+  console.log(`   Impresora: ${PRINTER_NAME} en ${PRINTER_PORT}`)
   console.log('   Endpoints:')
   console.log('     GET  /health')
   console.log('     POST /open-drawer')

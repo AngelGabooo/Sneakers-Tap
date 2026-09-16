@@ -1,3 +1,4 @@
+// src/pages/CashClose.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -22,6 +23,7 @@ import { useView } from '../context/ViewContext'
 import { useAuth } from '../context/AuthContext'
 import { useCash } from '../context/CashContext'
 import { useSales } from '../context/SalesContext'
+import { notifyCashClose } from '../utils/notifyAdmins'
 
 const AUTH_LIMIT = 100
 
@@ -144,15 +146,17 @@ export default function CashClose() {
     setConfirmOpen(true)
   }
 
-  const handleConfirmClose = () => {
+  const handleConfirmClose = async () => {
     if (!session) return
     setSubmitting(true)
 
-    setTimeout(() => {
-      const closedSession = closeCash(session.id, {
+    try {
+      // ✅ AWAIT — antes faltaba
+      const closedSession = await closeCash(session.id, {
         closingFund: counted,
-        closedBy: user?.name || 'Henry Sneakers',
+        closedBy: user?.name || 'Usuario',
         notes: notes || '',
+        expectedCash: summary.expectedCash,
         difference: diff,
         reason,
         authorizedBy,
@@ -164,13 +168,29 @@ export default function CashClose() {
       setClosed(closedSession || { ...session, status: 'closed', closingFund: counted })
       setToast({
         title: 'Caja cerrada correctamente',
-        description: `La sesión ${session.id} fue cerrada y registrada.`,
+        description: `La sesión ${session.cashLabel || session.id} fue cerrada y registrada.`,
       })
-    }, 700)
+
+      // 🔔 Notificar a los administradores
+      notifyCashClose({
+        session: closedSession || session,
+        actorName: user?.name || 'Usuario',
+        actorRole: user?.role || 'Cajero',
+        difference: diff,
+        expected: summary.expectedCash,
+        counted,
+      })
+    } catch (err) {
+      console.error('❌ Error cerrando caja:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al cerrar caja',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleRequestAuth = () => {
-    // 🚧 Simulación de autorización
     setAuthorizedBy('María López')
     setAuthorizedAt(new Date().toISOString())
     setToast({
@@ -188,7 +208,7 @@ export default function CashClose() {
     >
       <nav className="flex items-center gap-1.5 text-sm mb-5">
         <button
-          onClick={() => navigate('cash')}
+          onClick={() => navigate('cash-current')}
           className="text-gray-500 dark:text-dark-muted hover:text-brand-blue transition-colors font-medium"
         >
           Caja
@@ -315,7 +335,7 @@ export default function CashClose() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

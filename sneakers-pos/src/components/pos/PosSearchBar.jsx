@@ -1,3 +1,4 @@
+// src/components/pos/PosSearchBar.jsx
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Search, ScanLine, X, Zap } from 'lucide-react'
 
@@ -7,31 +8,40 @@ export default function PosSearchBar({
   onScan,
   autoFocus = true,
   refocusOnIdle = true,
+  paused = false,       // 👈 NUEVO: pausar cuando hay modales abiertos
 }) {
   const inputRef = useRef(null)
   const [flash, setFlash] = useState(false)
 
   useEffect(() => {
-    if (autoFocus) inputRef.current?.focus()
-  }, [autoFocus])
+    if (autoFocus && !paused) inputRef.current?.focus()
+  }, [autoFocus, paused])
 
+  // 👇 NO robar foco cuando `paused` es true (modal abierto)
   useEffect(() => {
-    if (!refocusOnIdle) return
+    if (!refocusOnIdle || paused) return
+
     const refocus = () => {
       const active = document.activeElement
       const isTypingElsewhere =
         active &&
         ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) &&
         active !== inputRef.current
-      if (!isTypingElsewhere) inputRef.current?.focus()
+      // Solo enfocar si:
+      // - No hay ningún input/textarea/select activo
+      // - No hay modales abiertos (paused)
+      // - El body es el elemento activo (nadie tiene foco)
+      if (!isTypingElsewhere && (!active || active === document.body)) {
+        inputRef.current?.focus()
+      }
     }
     const t = setInterval(refocus, 800)
     return () => clearInterval(t)
-  }, [refocusOnIdle])
+  }, [refocusOnIdle, paused])
 
   const focusInput = useCallback(() => {
-    inputRef.current?.focus()
-  }, [])
+    if (!paused) inputRef.current?.focus()
+  }, [paused])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -98,9 +108,11 @@ export default function PosSearchBar({
       <button
         type="button"
         onClick={focusInput}
+        disabled={paused}
         className="
           absolute inset-y-0 right-0 pr-3 flex items-center gap-1
           text-xs font-medium text-brand-blue hover:text-brand-blueDark transition-colors
+          disabled:opacity-50 disabled:cursor-not-allowed
         "
         title="Reactivar foco para escanear"
       >

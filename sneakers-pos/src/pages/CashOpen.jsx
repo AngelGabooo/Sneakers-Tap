@@ -1,3 +1,4 @@
+// src/pages/CashOpen.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -14,16 +15,14 @@ import CashOpenNote from '../components/cash/open/CashOpenNote'
 import CashOpenSummary from '../components/cash/open/CashOpenSummary'
 import CashOpenConfirmModal from '../components/cash/open/CashOpenConfirmModal'
 import CashOpenSuccessModal from '../components/cash/open/CashOpenSuccessModal'
-import CashOpenSkeleton from '../components/cash/open/CashOpenSkeleton' // 👈 FALTABA
+import CashOpenSkeleton from '../components/cash/open/CashOpenSkeleton'
 import { useView } from '../context/ViewContext'
 import { useAuth } from '../context/AuthContext'
 import { useCash } from '../context/CashContext'
+import { notifyCashOpen } from '../utils/notifyAdmins'
 
-// 🚧 Config de cajas — reemplazar por API cuando conectes backend
 const CASHES = [
-  { id: 'C001', label: 'Caja #001', branch: 'Tienda principal', status: 'closed' },
-  { id: 'C002', label: 'Caja #002', branch: 'Tienda principal', status: 'closed' },
-  { id: 'C003', label: 'Caja #003', branch: 'Sucursal Norte',   status: 'closed' },
+  { id: 'C001', label: 'Caja principal', branch: 'Tienda principal', status: 'closed' },
 ]
 
 export default function CashOpen() {
@@ -32,7 +31,7 @@ export default function CashOpen() {
   const { getOpenSession, openCash, sessions } = useCash()
 
   const [loading, setLoading] = useState(true)
-  const [cashId, setCashId] = useState('')
+  const [cashId, setCashId] = useState('C001')
   const [initialFund, setInitialFund] = useState('')
   const [breakdownEnabled, setBreakdownEnabled] = useState(false)
   const [breakdownValues, setBreakdownValues] = useState({})
@@ -43,7 +42,6 @@ export default function CashOpen() {
   const [successSession, setSuccessSession] = useState(null)
   const [toast, setToast] = useState(null)
 
-  // Fecha y hora de apertura (fija al montar)
   const now = useMemo(() => new Date(), [])
 
   useEffect(() => {
@@ -52,7 +50,6 @@ export default function CashOpen() {
     return () => clearTimeout(t)
   }, [])
 
-  // Cajas con su estado real (open si hay sesión abierta)
   const cashesWithStatus = useMemo(() => {
     return CASHES.map((c) => {
       const open = getOpenSession(c.id)
@@ -66,7 +63,6 @@ export default function CashOpen() {
   const selectedCash = cashesWithStatus.find((c) => c.id === cashId) || null
   const openSession = cashId ? getOpenSession(cashId) : null
 
-  // Total contado por denominaciones
   const breakdownTotal = useMemo(() => {
     return Object.entries(breakdownValues).reduce((acc, [denom, qty]) => {
       return acc + Number(denom) * (Number(qty) || 0)
@@ -76,20 +72,18 @@ export default function CashOpen() {
   const declared = Number(initialFund) || 0
   const breakdownMatches = !breakdownEnabled || Math.abs(breakdownTotal - declared) < 0.01
 
-  // Validación global
   const allValid =
     !!selectedCash &&
     selectedCash.status === 'closed' &&
     declared > 0 &&
     breakdownMatches
 
-  // Handlers
   const handleNavigate = (key) => navigate(key)
 
   const handleCancel = () => {
     const hasChanges = !!cashId || !!initialFund || !!note
     if (hasChanges && !window.confirm('¿Salir sin abrir la caja? Los datos del fondo inicial que ingresaste no se guardarán.')) return
-    navigate('cash')
+    navigate('cash-current')
   }
 
   const handleBreakdownChange = (denom, value) => {
@@ -106,20 +100,20 @@ export default function CashOpen() {
     setConfirmOpen(true)
   }
 
-  const handleConfirmOpen = () => {
+  const handleConfirmOpen = async () => {
     if (!selectedCash) return
     setSubmitting(true)
 
-    // 🚧 TODO: POST /api/cash/sessions
-    setTimeout(() => {
-      const session = openCash({
+    try {
+      // ✅ AWAIT — antes faltaba
+      const session = await openCash({
         cashId: selectedCash.id,
         cashLabel: selectedCash.label,
         branch: selectedCash.branch,
         responsibleId: user?.id || null,
-        responsibleName: user?.name || 'Henry Sneakers',
-        responsibleRole: user?.role || 'Administrador',
-        openedBy: user?.name || 'Henry Sneakers',
+        responsibleName: user?.name || 'Usuario',
+        responsibleRole: user?.role || 'Vendedor',
+        openedBy: user?.name || 'Usuario',
         initialFund: declared,
         breakdown: breakdownEnabled ? breakdownValues : null,
         note,
@@ -132,12 +126,28 @@ export default function CashOpen() {
         title: 'Caja abierta',
         description: `${session.cashLabel} está lista para operar.`,
       })
-    }, 600)
+
+      // 🔔 Notificar a los administradores
+      notifyCashOpen({
+        session,
+        actorName: user?.name || 'Usuario',
+        actorRole: user?.role || 'Vendedor',
+        initialFund: declared,
+        branch: selectedCash.branch,
+      })
+    } catch (err) {
+      console.error('❌ Error abriendo caja:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al abrir caja',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleGoToCash = () => {
     setSuccessSession(null)
-    navigate('cash')
+    navigate('cash-current')
   }
 
   const handleGoToPos = () => {
@@ -152,10 +162,9 @@ export default function CashOpen() {
       period={undefined}
       onPeriodChange={undefined}
     >
-      {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm mb-5">
         <button
-          onClick={() => navigate('cash')}
+          onClick={() => navigate('cash-current')}
           className="text-gray-500 dark:text-dark-muted hover:text-brand-blue transition-colors font-medium"
         >
           Caja
@@ -169,13 +178,10 @@ export default function CashOpen() {
       ) : (
         <>
           <CashOpenHeader onCancel={handleCancel} />
-
           <CashOpenNotice />
-
           <CashOpenSteps current={cashId ? (declared > 0 ? 'confirm' : 'fund') : 'cash'} />
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Formulario */}
             <div className="lg:col-span-2 space-y-5">
               <CashOpenSelector
                 cashes={cashesWithStatus}
@@ -186,15 +192,12 @@ export default function CashOpen() {
               />
 
               <CashOpenResponsible user={user} />
-
               <CashOpenDateTime date={now} />
-
               <CashOpenInitialFund
                 value={initialFund}
                 onChange={setInitialFund}
                 error={errors.initialFund}
               />
-
               <CashOpenBreakdown
                 enabled={breakdownEnabled}
                 onToggle={setBreakdownEnabled}
@@ -203,11 +206,9 @@ export default function CashOpen() {
                 total={breakdownTotal}
                 declared={declared}
               />
-
               <CashOpenNote value={note} onChange={setNote} />
             </div>
 
-            {/* Resumen */}
             <aside className="lg:col-span-1 space-y-5">
               <CashOpenSummary
                 cash={selectedCash}
@@ -225,7 +226,6 @@ export default function CashOpen() {
         </>
       )}
 
-      {/* Modales */}
       <CashOpenConfirmModal
         open={confirmOpen}
         cash={selectedCash}
@@ -246,7 +246,7 @@ export default function CashOpen() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

@@ -1,173 +1,178 @@
 // src/context/AuthContext.jsx
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { hashPassword } from '../utils/password'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from 'react'
+import { authService } from '../services/authService'
+import { profilesService } from '../services/profilesService'
 
 const AuthContext = createContext(null)
 
-const USERS_KEY = 'sneakers-users'
-const SESSION_KEY = 'sneakers-session'
-const SESSIONS_LOG_KEY = 'sneakers-user-sessions'
-
-function readUsers() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || '[]') } catch { return [] }
-}
-function writeUsers(users) {
-  try { localStorage.setItem(USERS_KEY, JSON.stringify(users)) } catch {}
-}
-function readSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch { return null }
-}
-function writeSession(user) {
-  try {
-    if (user) localStorage.setItem(SESSION_KEY, JSON.stringify(user))
-    else localStorage.removeItem(SESSION_KEY)
-  } catch {}
-}
-
-function logSession(userId, entry) {
-  try {
-    const all = JSON.parse(localStorage.getItem(SESSIONS_LOG_KEY) || '{}')
-    const list = all[userId] || []
-    list.unshift(entry)
-    all[userId] = list.slice(0, 50)
-    localStorage.setItem(SESSIONS_LOG_KEY, JSON.stringify(all))
-  } catch {}
-}
-
-function closeLastSession(userId, reason) {
-  try {
-    const all = JSON.parse(localStorage.getItem(SESSIONS_LOG_KEY) || '{}')
-    const list = all[userId] || []
-    const last = list.find((s) => !s.endedAt)
-    if (last) {
-      last.endedAt = new Date().toISOString()
-      last.endReason = reason
-      all[userId] = list
-      localStorage.setItem(SESSIONS_LOG_KEY, JSON.stringify(all))
-    }
-  } catch {}
+/**
+ * Mapea un perfil de Supabase a la estructura que usa la app.
+ */
+function mapProfileToUser(profile, authUser) {
+  if (!profile) return null
+  return {
+    id: profile.id,
+    name: profile.full_name || authUser?.email?.split('@')[0] || 'Usuario',
+    email: profile.email || authUser?.email || '',
+    role: profile.role?.name || 'Sin rol',
+    roleId: profile.role?.id || null,
+    permissions: profile.role?.permissions || [],
+    branch: profile.branch?.name || '—',
+    branchId: profile.branch?.id || null,
+    employeeId: profile.employee_id || null,
+    phone: profile.phone || null,
+    status: profile.status || 'active',
+    avatarUrl: profile.avatar_url || null,
+  }
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => readSession())
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
 
+  /**
+   * Carga el perfil completo del usuario autenticado.
+   */
+  const loadProfile = useCallback(async (authUser) => {
+    if (!authUser) {
+      setUser(null)
+      return null
+    }
+
+    try {
+      const profile = await profilesService.getById(authUser.id)
+
+      // Verificar estado de la cuenta
+      if (['inactive', 'suspended', 'blocked', 'pending'].includes(profile.status)) {
+        const messages = {
+          inactive: 'Tu cuenta está desactivada. Contacta al administrador.',
+          suspended: 'Tu cuenta está suspendida.',
+          blocked: 'Tu cuenta está bloqueada.',
+          pending: 'Tu cuenta aún no ha sido activada.',
+        }
+        console.warn('⚠️ Cuenta no activa:', profile.status)
+        await authService.signOut()
+        setUser(null)
+        return { error: messages[profile.status] }
+      }
+
+      const mapped = mapProfileToUser(profile, authUser)
+      setUser(mapped)
+      return { user: mapped }
+    } catch (err) {
+      console.error('❌ Error cargando perfil:', err)
+      setUser(null)
+      return { error: 'No se pudo cargar tu perfil.' }
+    }
+  }, [])
+
+  /**
+   * Login.
+   */
   const login = useCallback(async ({ email, password }) => {
-    await new Promise((r) => setTimeout(r, 400))
-
     if (!email || !password) {
       return { ok: false, error: 'Correo y contraseña son obligatorios.' }
     }
 
-    const users = readUsers()
-    const found = users.find(
-      (u) => (u.email || '').toLowerCase() === email.trim().toLowerCase(),
-    )
+    try {
+      const data = await authService.signIn(email, password)
+      const authUser = data.user
 
-    if (!found) {
-      return { ok: false, error: 'Correo o contraseña incorrectos.' }
+      const result = await loadProfile(authUser)
+
+      if (result?.error) {
+        return { ok: false, error: result.error }
+      }
+
+      // Actualizar last_access en background
+      profilesService.touchLastAccess(authUser.id).catch(() => {})
+
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err.message || 'Error al iniciar sesión.' }
     }
+  }, [loadProfile])
 
-    const incoming = hashPassword(password)
-    if (found.password !== incoming) {
-      return { ok: false, error: 'Correo o contraseña incorrectos.' }
-    }
-
-    if (found.status === 'inactive') {
-      return { ok: false, error: 'Tu cuenta está desactivada. Contacta al administrador.' }
-    }
-    if (found.status === 'suspended') {
-      return { ok: false, error: 'Tu cuenta está suspendida.' }
-    }
-    if (found.status === 'blocked') {
-      return { ok: false, error: 'Tu cuenta está bloqueada.' }
-    }
-    if (found.status === 'pending') {
-      return { ok: false, error: 'Tu cuenta aún no ha sido activada.' }
-    }
-
-    const now = new Date().toISOString()
-    const updated = users.map((u) =>
-      u.id === found.id
-        ? { ...u, lastAccess: now, lastAccessRelative: 'Hace unos segundos' }
-        : u,
-    )
-    writeUsers(updated)
-
-    logSession(found.id, {
-      id: `ses_${Date.now()}`,
-      startedAt: now,
-      device: navigator.userAgent,
-      ip: null,
-      endedAt: null,
-      endReason: null,
-    })
-
-    const sessionUser = {
-      id: found.id,
-      name: found.fullName,
-      email: found.email,
-      role: found.role,
-      branch: found.branch,
-      employeeId: found.employeeId,
-      avatarUrl: null,
-    }
-    setUser(sessionUser)
-    writeSession(sessionUser)
-
-    return { ok: true }
-  }, [])
-
-  const logout = useCallback(() => {
-    if (user?.id) {
-      closeLastSession(user.id, 'Cierre de sesión')
+  /**
+   * Logout.
+   */
+  const logout = useCallback(async () => {
+    try {
+      await authService.signOut()
+    } catch (err) {
+      console.warn('Error al cerrar sesión:', err)
     }
     setUser(null)
-    writeSession(null)
-  }, [user])
+  }, [])
 
-  const refreshUser = useCallback(() => {
-    if (!user) return
-    const users = readUsers()
-    const found = users.find((u) => u.id === user.id)
-    if (!found) {
-      logout()
-      return
-    }
-    if (['inactive', 'suspended', 'blocked', 'pending'].includes(found.status)) {
-      logout()
-      return
-    }
-    const sessionUser = {
-      id: found.id,
-      name: found.fullName,
-      email: found.email,
-      role: found.role,
-      branch: found.branch,
-      employeeId: found.employeeId,
-      avatarUrl: null,
-    }
-    setUser(sessionUser)
-    writeSession(sessionUser)
-  }, [user, logout])
+  /**
+   * Refrescar perfil manualmente.
+   */
+  const refreshUser = useCallback(async () => {
+    const authUser = await authService.getUser()
+    if (authUser) await loadProfile(authUser)
+  }, [loadProfile])
 
+  /**
+   * Al montar: verificar sesión existente.
+   */
   useEffect(() => {
-    const handler = (e) => {
-      if (e.key === USERS_KEY && user) refreshUser()
+    let mounted = true
+
+    async function init() {
+      try {
+        const session = await authService.getSession()
+        if (!mounted) return
+
+        if (session?.user) {
+          await loadProfile(session.user)
+        } else {
+          setUser(null)
+        }
+      } catch (err) {
+        console.error('❌ Error inicializando auth:', err)
+        setUser(null)
+      } finally {
+        if (mounted) setLoading(false)
+      }
     }
-    window.addEventListener('storage', handler)
-    const interval = setInterval(() => { if (user) refreshUser() }, 30000)
+
+    init()
+
+    // Escuchar cambios de sesión (login, logout, refresh)
+    const { data: { subscription } } = authService.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return
+        if (event === 'SIGNED_OUT') {
+          setUser(null)
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          await loadProfile(session.user)
+        }
+      },
+    )
+
     return () => {
-      window.removeEventListener('storage', handler)
-      clearInterval(interval)
+      mounted = false
+      subscription?.unsubscribe()
     }
-  }, [user, refreshUser])
+  }, [loadProfile])
 
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: !!user, login, logout, refreshUser }}
+      value={{
+        user,
+        loading,
+        isAuthenticated: !!user,
+        login,
+        logout,
+        refreshUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

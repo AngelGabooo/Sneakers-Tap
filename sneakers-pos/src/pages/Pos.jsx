@@ -1,3 +1,4 @@
+// src/pages/Pos.jsx
 import { useEffect, useMemo, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Toast from '../components/common/Toast'
@@ -15,17 +16,24 @@ import PosSuccessModal from '../components/pos/PosSuccessModal'
 import PosSuspendModal from '../components/pos/PosSuspendModal'
 import PosTicketModal from '../components/pos/PosTicketModal'
 import { useView } from '../context/ViewContext'
+import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
 import { useProducts } from '../context/ProductsContext'
 import { useSales } from '../context/SalesContext'
 import { useCash } from '../context/CashContext'
+import { useSettings } from '../context/SettingsContext'
 import { openCashDrawer, printReceipt } from '../services/printerService'
+import { notifySale } from '../utils/notifyAdmins'
 
 export default function Pos() {
   const { navigate } = useView()
+  const { user } = useAuth()
   const { products } = useProducts()
   const { createSale } = useSales()
   const { getAnyOpenSession } = useCash()
+  const { settings } = useSettings()
+  const { store, ticket } = settings
+
   const {
     items, customer, totals,
     addItem, updateQuantity, removeItem, clear,
@@ -59,6 +67,59 @@ export default function Pos() {
   }, [])
 
   // -------------------------------------------------------------
+  // Helper: arma dirección de la tienda para el ticket
+  // -------------------------------------------------------------
+  const buildTicketAddress = () => {
+    if (!ticket.header.showAddress) return null
+    const a = store.address || {}
+    const parts = [
+      a.street,
+      a.exteriorNumber,
+      a.neighborhood,
+      a.city,
+      a.state,
+      a.postalCode,
+    ].filter(Boolean)
+    return parts.length ? parts.join(', ') : null
+  }
+
+  // -------------------------------------------------------------
+  // Helper: arma el objeto con TODOS los datos configurables
+  // que el server necesita para imprimir
+  // -------------------------------------------------------------
+  const buildTicketPayload = (sale) => {
+    const storeName = ticket.header.name || store.commercialName || ''
+
+    return {
+      ...sale,
+      ticketHeader: {
+        name:    storeName,
+        tagline: ticket.header.tagline || null,
+        address: buildTicketAddress(),
+        phone:   ticket.header.showPhone ? store.phone || null : null,
+        email:   ticket.header.showEmail ? store.email || null : null,
+        rfc:     ticket.header.showRfc   ? store.rfc   || null : null,
+      },
+      ticketOptions: {
+  showNumber:         ticket.sale.showNumber,
+  showDate:           ticket.sale.showDate,
+  showTime:           ticket.sale.showTime,
+  showSeller:         ticket.sale.showSeller,
+  showCash:           ticket.sale.showCash,
+  showBranch:         ticket.sale.showBranch,
+  showCustomer:       ticket.sale.showCustomer,
+  showPaymentMethod:  ticket.sale.showPaymentMethod,
+},
+      ticketFooter: {
+        thankYouMessage: ticket.footer.showThankYou    ? ticket.footer.thankYouMessage || null : null,
+        returnPolicy:    ticket.footer.showReturnPolicy ? ticket.footer.returnPolicy   || null : null,
+        website:         ticket.footer.showWebsite      ? store.website || null : null,
+        name:            storeName || null,
+      },
+    }
+  }
+
+  // -------------------------------------------------------------
   // Filtro de productos
   // -------------------------------------------------------------
   const filtered = useMemo(() => {
@@ -88,7 +149,7 @@ export default function Pos() {
   }, [products, category, search])
 
   // -------------------------------------------------------------
-  // 🔑 Scanner robusto
+  // Scanner robusto
   // -------------------------------------------------------------
   const sameCode = (a, b) => {
     const A = String(a || '').trim()
@@ -110,7 +171,6 @@ export default function Pos() {
 
     if (!code) return
 
-    // 1) barcode en variantes
     for (const p of products) {
       const variant = (p.variants || []).find((v) => sameCode(v.barcode, code))
       if (variant) {
@@ -123,7 +183,6 @@ export default function Pos() {
       }
     }
 
-    // 2) barcode en producto
     for (const p of products) {
       if (sameCode(p.barcode, code)) {
         if ((p.variants || []).length > 0) {
@@ -136,7 +195,6 @@ export default function Pos() {
       }
     }
 
-    // 3) SKU en variantes
     for (const p of products) {
       const variant = (p.variants || []).find((v) => sameCode(v.sku, code))
       if (variant) {
@@ -149,7 +207,6 @@ export default function Pos() {
       }
     }
 
-    // 4) SKU en producto
     for (const p of products) {
       if (sameCode(p.sku, code)) {
         if ((p.variants || []).length > 0) {
@@ -191,7 +248,7 @@ export default function Pos() {
   }
 
   // -------------------------------------------------------------
-  // Cobro — abrir cajón si es efectivo
+  // Cobro
   // -------------------------------------------------------------
   const handleConfirmSale = async (payment) => {
     if (!cashOpen) {
@@ -249,81 +306,100 @@ export default function Pos() {
         }
       : null
 
-    const sale = createSale({
-      cashier: 'Henry Sneakers',
-      cashierRole: 'Administrador',
-      customerId: customer?.id || null,
-      customerName: customer?.name || null,
-      customerType: customer?.isWholesale ? 'wholesale' : 'regular',
-      wholesaleSnapshot,
-      items: items.map((i) => ({
-        key: i.key,
-        productId: i.productId,
-        productName: i.productName,
-        variantId: i.variantId,
-        variantLabel: i.variantLabel,
-        sku: i.sku,
-        imageUrl: i.imageUrl,
-        price: i.price,
-        basePrice: i.basePrice,
-        quantity: i.quantity,
-      })),
-      totals: {
-        subtotal: totals.subtotal,
-        discountAmount: totals.discountAmount,
-        wholesaleDiscountAmount: totals.wholesaleDiscountAmount,
-        extraDiscount: totals.extraDiscount,
-        tax: totals.tax,
-        total: totals.total,
-      },
-      payment: {
-        method: payment.method,
-        methodLabel,
-        cashReceived: payment.cashReceived || null,
-        cardType: payment.cardType || null,
-        reference: payment.reference || null,
+    const sellerName = user?.name || 'Usuario'
+    const sellerRole = user?.role || 'Vendedor'
+
+    try {
+      // ✅ AWAIT — antes faltaba
+      const sale = await createSale({
+        cashier: sellerName,
+        cashierRole: sellerRole,
+        sellerId: user?.id || null,
+        customerId: customer?.id || null,
+        customerName: customer?.name || null,
+        customerType: customer?.isWholesale ? 'wholesale' : 'regular',
+        wholesaleSnapshot,
+        items: items.map((i) => ({
+          key: i.key,
+          productId: i.productId,
+          productName: i.productName,
+          variantId: i.variantId,
+          variantLabel: i.variantLabel,
+          sku: i.sku,
+          imageUrl: i.imageUrl,
+          price: i.price,
+          basePrice: i.basePrice,
+          quantity: i.quantity,
+        })),
+        totals: {
+          subtotal: totals.subtotal,
+          discountAmount: totals.discountAmount,
+          wholesaleDiscountAmount: totals.wholesaleDiscountAmount,
+          extraDiscount: totals.extraDiscount,
+          tax: totals.tax,
+          total: totals.total,
+        },
+        payment: {
+          method: payment.method,
+          methodLabel,
+          cashReceived: payment.cashReceived || null,
+          cardType: payment.cardType || null,
+          reference: payment.reference || null,
+          change: payment.change || 0,
+        },
         change: payment.change || 0,
-      },
-      change: payment.change || 0,
-      total: totals.total,
-      branch: cashBranch,
-      cashId,
-      cashSessionId: openSession?.id || null,
-      cashRegisterId: openSession?.id || 'CAJ-000001',
-      notes: '',
-    })
+        total: totals.total,
+        branch: cashBranch,
+        cashId,
+        cashSessionId: openSession?.id || null,
+        cashRegisterId: openSession?.id || 'CAJ-000001',
+        notes: '',
+      })
 
-    const fullSale = { ...sale, methodLabel }
-    setSuccessSale(fullSale)
-    setCheckoutOpen(false)
-    setSubmitting(false)
+      const fullSale = { ...sale, methodLabel }
+      setSuccessSale(fullSale)
+      setCheckoutOpen(false)
+      setSubmitting(false)
 
-    // 🔑 Abrir cajón automáticamente si es efectivo
-    if (payment.method === 'cash') {
-      const result = await openCashDrawer()
-      if (!result.ok) {
-        console.warn('⚠️ No se pudo abrir el cajón:', result.error)
-        setToast({
-          title: 'Cajón no disponible',
-          description: 'Verifica que el servidor de impresión esté corriendo.',
-        })
-      } else {
-        console.log('✅ Cajón GHIA abierto')
+      // 🔔 Notificar a los administradores
+      notifySale({
+        sale: fullSale,
+        actorName: sellerName,
+        actorRole: sellerRole,
+        cashId,
+        branch: cashBranch,
+      })
+
+      if (payment.method === 'cash') {
+        const result = await openCashDrawer()
+        if (!result.ok) {
+          console.warn('⚠️ No se pudo abrir el cajón:', result.error)
+          setToast({
+            title: 'Cajón no disponible',
+            description: 'Verifica que el servidor de impresión esté corriendo.',
+          })
+        }
       }
+    } catch (err) {
+      console.error('❌ Error creando venta:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al registrar la venta',
+        description: err.message || 'Intenta de nuevo.',
+      })
     }
   }
 
   // -------------------------------------------------------------
-  // Imprimir ticket — primero backend, si falla abre el modal
+  // Imprimir ticket
   // -------------------------------------------------------------
   const handlePrintTicket = async () => {
     if (!successSale) return
 
-    // 1) Intentar imprimir con el backend local
-    const result = await printReceipt(successSale)
+    const payload = buildTicketPayload(successSale)
+    const result = await printReceipt(payload)
 
     if (result.ok) {
-      console.log('✅ Ticket impreso por GTP58B1')
       setToast({
         title: 'Ticket impreso',
         description: `Se imprimió el ticket ${successSale.folio}.`,
@@ -331,15 +407,12 @@ export default function Pos() {
       return
     }
 
-    // 2) Fallback: abrir el modal con window.print()
-    console.warn('⚠️ Backend de impresión no disponible, usando fallback:', result.error)
     setTicketOpen(true)
   }
 
   const handleCloseTicket = () => setTicketOpen(false)
 
   const handleSendEmail = (sale) => {
-    console.log('Enviar ticket por correo:', sale)
     setToast({
       title: 'Comprobante preparado',
       description: 'Función pendiente de conexión con el backend.',
@@ -356,7 +429,6 @@ export default function Pos() {
   }
 
   const handleSuspendConfirm = ({ reference }) => {
-    console.log('Venta suspendida:', reference, items)
     setToast({ title: 'Venta suspendida', description: reference })
     clear()
     setMobileCartOpen(false)

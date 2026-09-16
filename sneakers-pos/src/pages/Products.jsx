@@ -1,3 +1,4 @@
+// src/pages/Products.jsx
 import { useMemo, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProductsHeader from '../components/products/ProductsHeader'
@@ -6,14 +7,11 @@ import ProductsToolbar from '../components/products/ProductsToolbar'
 import ProductsQuickFilters from '../components/products/ProductsQuickFilters'
 import ProductsBulkBar from '../components/products/ProductsBulkBar'
 import ProductsTable from '../components/products/ProductsTable'
+import ConfirmModal from '../components/common/ConfirmModal'
+import Toast from '../components/common/Toast'
 import { useView } from '../context/ViewContext'
 import { useProducts } from '../context/ProductsContext'
 
-/**
- * Suma el stock de todas las variantes.
- * Si el producto tiene `variants`, se usa la suma.
- * Si no, cae al `initialStock` (por si algún producto viejo no tiene variantes).
- */
 function getTotalStock(p) {
   if (Array.isArray(p.variants) && p.variants.length > 0) {
     return p.variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
@@ -21,10 +19,6 @@ function getTotalStock(p) {
   return Number(p.initialStock) || 0
 }
 
-/**
- * Cuenta tallas y colores reales del producto.
- * Prioriza `variants`, cae a `sizes`/`colors` si no hay variantes.
- */
 function getVariantCounts(p) {
   if (Array.isArray(p.variants) && p.variants.length > 0) {
     const sizes = new Set(p.variants.map((v) => v.size))
@@ -37,9 +31,6 @@ function getVariantCounts(p) {
   }
 }
 
-/**
- * Formatea el resumen de variantes: "5 tallas · 2 colores"
- */
 function formatVariants(p) {
   const { sizes, colors } = getVariantCounts(p)
   const parts = []
@@ -48,9 +39,6 @@ function formatVariants(p) {
   return parts.length ? parts.join(' · ') : '—'
 }
 
-/**
- * Convierte un producto del store al formato plano que espera ProductsTable.
- */
 function normalizeProduct(p) {
   return {
     id: p.id,
@@ -68,7 +56,7 @@ function normalizeProduct(p) {
 
 export default function Products() {
   const { navigate } = useView()
-  const { products } = useProducts()
+  const { products, deleteProduct, toggleProductStatus } = useProducts()
 
   const [search, setSearch] = useState('')
   const [quickFilter, setQuickFilter] = useState('all')
@@ -79,7 +67,16 @@ export default function Products() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
 
-  // Lista normalizada
+  // Modal de eliminación
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, ids: [] })
+  const [deleting, setDeleting] = useState(false)
+
+  // Modal de activar/desactivar (bulk)
+  const [statusConfirm, setStatusConfirm] = useState({ open: false, ids: [], status: null })
+
+  // Toast
+  const [toast, setToast] = useState(null)
+
   const normalized = useMemo(() => products.map(normalizeProduct), [products])
 
   const filtered = useMemo(() => {
@@ -133,6 +130,114 @@ export default function Products() {
     outOfStock: { value: normalized.filter((p) => p.stock === 0).length },
   }), [normalized])
 
+  // ============================================================
+  // ACCIONES
+  // ============================================================
+
+  /**
+   * Abre el modal de confirmación para eliminar 1 producto.
+   */
+  const handleDelete = (id) => {
+    setDeleteConfirm({ open: true, ids: [id] })
+  }
+
+  /**
+   * Abre el modal de confirmación para eliminar los seleccionados.
+   */
+  const handleBulkDelete = () => {
+    if (selectedIds.length === 0) return
+    setDeleteConfirm({ open: true, ids: [...selectedIds] })
+  }
+
+  /**
+   * Ejecuta la eliminación.
+   */
+  const handleConfirmDelete = async () => {
+    setDeleting(true)
+    try {
+      for (const id of deleteConfirm.ids) {
+        await deleteProduct(id)
+      }
+      setToast({
+        title: 'Productos eliminados',
+        description: `Se eliminaron ${deleteConfirm.ids.length} producto${deleteConfirm.ids.length > 1 ? 's' : ''}.`,
+      })
+      setSelectedIds([])
+      setDeleteConfirm({ open: false, ids: [] })
+    } catch (err) {
+      console.error('❌ Error eliminando:', err)
+      setToast({
+        title: 'Error al eliminar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  /**
+   * Alternar activo/inactivo de un producto individual.
+   */
+  const handleToggleActive = async (id) => {
+    const product = products.find((p) => p.id === id)
+    if (!product) return
+    const nextStatus = product.status === 'active' ? 'inactive' : 'active'
+    try {
+      await toggleProductStatus(id, nextStatus)
+      setToast({
+        title: nextStatus === 'active' ? 'Producto activado' : 'Producto desactivado',
+        description: `${product.name} ahora está ${nextStatus === 'active' ? 'disponible para venta' : 'oculto para nuevas ventas'}.`,
+      })
+    } catch (err) {
+      console.error('❌ Error cambiando status:', err)
+      setToast({
+        title: 'Error',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
+  }
+
+  /**
+   * Bulk: cambiar status (activar o desactivar).
+   */
+  const handleBulkStatus = (status) => {
+    if (selectedIds.length === 0) return
+    setStatusConfirm({ open: true, ids: [...selectedIds], status })
+  }
+
+  const handleConfirmBulkStatus = async () => {
+    setDeleting(true)
+    try {
+      for (const id of statusConfirm.ids) {
+        await toggleProductStatus(id, statusConfirm.status)
+      }
+      const isActive = statusConfirm.status === 'active'
+      setToast({
+        title: isActive ? 'Productos activados' : 'Productos desactivados',
+        description: `${statusConfirm.ids.length} producto${statusConfirm.ids.length > 1 ? 's' : ''} ${isActive ? 'activado' : 'desactivado'}${statusConfirm.ids.length > 1 ? 's' : ''}.`,
+      })
+      setSelectedIds([])
+      setStatusConfirm({ open: false, ids: [], status: null })
+    } catch (err) {
+      console.error('❌ Error bulk status:', err)
+      setToast({
+        title: 'Error',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleDuplicate = (id) => {
+    const original = products.find((p) => p.id === id)
+    if (!original) return
+    setToast({
+      title: 'Duplicar producto',
+      description: 'Esta función estará disponible próximamente.',
+    })
+  }
+
   return (
     <DashboardLayout
       activeKey="products"
@@ -162,16 +267,6 @@ export default function Products() {
         onChange={(v) => { setQuickFilter(v); setPage(1) }}
       />
 
-      <ProductsBulkBar
-        count={selectedIds.length}
-        onClear={() => setSelectedIds([])}
-        onActivate={() => console.log('Activar seleccionados')}
-        onDeactivate={() => console.log('Desactivar seleccionados')}
-        onChangeCategory={() => console.log('Cambiar categoría')}
-        onExport={() => console.log('Exportar seleccionados')}
-        onDelete={() => console.log('Eliminar seleccionados')}
-      />
-
       <ProductsTable
         items={filtered}
         loading={false}
@@ -182,9 +277,9 @@ export default function Products() {
         onSortChange={handleSortChange}
         onView={(id) => navigate('product-detail', { id })}
         onEdit={goToEdit}
-        onDuplicate={(id) => console.log('Duplicar producto', id)}
-        onToggleActive={(id) => console.log('Activar/Desactivar producto', id)}
-        onDelete={(id) => console.log('Eliminar producto', id)}
+        onDuplicate={handleDuplicate}
+        onToggleActive={handleToggleActive}
+        onDelete={handleDelete}
         onNew={goToCreate}
         searchQuery={search}
         onClearSearch={() => setSearch('')}
@@ -193,6 +288,63 @@ export default function Products() {
         total={total}
         onPageChange={setPage}
         onPerPageChange={(n) => { setPerPage(n); setPage(1) }}
+      />
+
+      {/* BulkBar flotante */}
+      <ProductsBulkBar
+        count={selectedIds.length}
+        onClear={() => setSelectedIds([])}
+        onActivate={() => handleBulkStatus('active')}
+        onDeactivate={() => handleBulkStatus('inactive')}
+        onChangeCategory={() => setToast({ title: 'Cambiar categoría', description: 'Próximamente' })}
+        onExport={() => setToast({ title: 'Exportar', description: 'Próximamente' })}
+        onDelete={handleBulkDelete}
+      />
+
+      {/* Modal de eliminación */}
+      <ConfirmModal
+        open={deleteConfirm.open}
+        tone="danger"
+        title={
+          deleteConfirm.ids.length === 1
+            ? '¿Eliminar este producto?'
+            : `¿Eliminar ${deleteConfirm.ids.length} productos?`
+        }
+        description="Esta acción no se puede deshacer."
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        loading={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteConfirm({ open: false, ids: [] })}
+      />
+
+      {/* Modal de activar/desactivar */}
+      <ConfirmModal
+        open={statusConfirm.open}
+        tone={statusConfirm.status === 'active' ? 'info' : 'warning'}
+        title={
+          statusConfirm.status === 'active'
+            ? '¿Activar los productos?'
+            : '¿Desactivar los productos?'
+        }
+        description={
+          statusConfirm.status === 'active'
+            ? 'Los productos estarán disponibles para venta.'
+            : 'Los productos quedarán ocultos para nuevas ventas.'
+        }
+        confirmText={statusConfirm.status === 'active' ? 'Sí, activar' : 'Sí, desactivar'}
+        cancelText="Cancelar"
+        loading={deleting}
+        onConfirm={handleConfirmBulkStatus}
+        onCancel={() => setStatusConfirm({ open: false, ids: [], status: null })}
+      />
+
+      <Toast
+        open={!!toast}
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
+        title={toast?.title}
+        description={toast?.description}
+        onClose={() => setToast(null)}
       />
     </DashboardLayout>
   )

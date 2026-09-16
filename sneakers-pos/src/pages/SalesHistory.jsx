@@ -1,3 +1,4 @@
+// src/pages/SalesHistory.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -13,8 +14,10 @@ import SalesHistoryTable from '../components/sales/history/SalesHistoryTable'
 import SalesHistoryCardList from '../components/sales/history/SalesHistoryCardList'
 import SalesHistoryCancelModal from '../components/sales/history/SalesHistoryCancelModal'
 import { useView } from '../context/ViewContext'
+import { useAuth } from '../context/AuthContext'
 import { useSales } from '../context/SalesContext'
 import { useProducts } from '../context/ProductsContext'
+import { notifySaleCancel } from '../utils/notifyAdmins'
 
 const fmtCurrency = (n) =>
   `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`
@@ -54,7 +57,8 @@ function inPeriod(sale, period, customFrom, customTo) {
 
 export default function SalesHistory() {
   const { navigate, viewParams } = useView()
-  const { sales, updateSale } = useSales()
+  const { user } = useAuth()
+  const { sales, updateSale, cancelSale } = useSales()
   const { products } = useProducts()
 
   const [loading, setLoading] = useState(true)
@@ -69,10 +73,9 @@ export default function SalesHistory() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(25)
   const [toast, setToast] = useState(null)
-  const [cancelSale, setCancelSale] = useState(null)
+  const [cancelSaleTarget, setCancelSaleTarget] = useState(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Filtros preestablecidos desde viewParams
   useEffect(() => {
     if (viewParams?.customerId) {
       setSearch(viewParams.customerName || '')
@@ -228,34 +231,46 @@ export default function SalesHistory() {
     })
   }
 
-  const handleCancel = (sale) => setCancelSale(sale)
+  const handleCancel = (sale) => setCancelSaleTarget(sale)
 
-  const handleConfirmCancel = ({ reason, notes }) => {
-    if (!cancelSale) return
+  const handleConfirmCancel = async ({ reason, notes }) => {
+    if (!cancelSaleTarget) return
     setSubmitting(true)
-    setTimeout(() => {
-      updateSale(cancelSale.id, {
-        status: 'cancelled',
-        cancelReason: reason,
-        cancelNotes: notes,
-        cancelledAt: new Date().toISOString(),
-        cancelledBy: 'Henry Sneakers',
+
+    try {
+      // ✅ Usamos cancelSale del context que ya hace el trabajo asíncrono
+      await cancelSale(cancelSaleTarget.id, {
+        reason,
+        notes,
+        cancelledBy: user?.name || 'Usuario',
       })
+
+      // 🔔 Notificar a los administradores
+      notifySaleCancel({
+        sale: cancelSaleTarget,
+        actorName: user?.name || 'Usuario',
+        actorRole: user?.role || 'Vendedor',
+        reason: reason || notes || 'Sin motivo registrado',
+      })
+
       setSubmitting(false)
-      setCancelSale(null)
+      setCancelSaleTarget(null)
       setToast({
         title: 'Venta cancelada',
-        description: `La venta ${cancelSale.folio} fue cancelada y quedó registrada en auditoría.`,
+        description: `La venta ${cancelSaleTarget.folio} fue cancelada y quedó registrada en auditoría.`,
       })
-    }, 500)
+    } catch (err) {
+      console.error('❌ Error cancelando venta:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al cancelar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleViewAudit = (sale) => {
-    console.log('Ver auditoría', sale)
-    setToast({
-      title: 'Auditoría',
-      description: 'Función pendiente: conectar con Vista #31.',
-    })
+    navigate('audit', { entity: sale?.folio })
   }
 
   const handleExport = (format) => {
@@ -379,16 +394,16 @@ export default function SalesHistory() {
       </div>
 
       <SalesHistoryCancelModal
-        open={!!cancelSale}
-        sale={cancelSale}
-        onClose={() => setCancelSale(null)}
+        open={!!cancelSaleTarget}
+        sale={cancelSaleTarget}
+        onClose={() => setCancelSaleTarget(null)}
         onConfirm={handleConfirmCancel}
         submitting={submitting}
       />
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

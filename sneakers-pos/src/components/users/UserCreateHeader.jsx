@@ -1,12 +1,17 @@
-import { ChevronRight, Save, X, UserPlus } from 'lucide-react'
+// src/components/users/UserCreateHeader.jsx
+import { ChevronRight, Save, X, UserPlus, UserCog } from 'lucide-react'
 import Button from '../common/Button'
+
 export default function UserCreateHeader({
+  mode = 'create', // 'create' | 'edit'
   onBack,
   onCancel,
   onSubmit,
   submitting = false,
   disabled = false,
 }) {
+  const isEdit = mode === 'edit'
+
   return (
     <>
       {/* Breadcrumb */}
@@ -20,7 +25,7 @@ export default function UserCreateHeader({
         </button>
         <ChevronRight size={14} className="text-gray-400" />
         <span className="text-brand-black dark:text-dark-text font-medium">
-          Nuevo empleado
+          {isEdit ? 'Editar empleado' : 'Nuevo empleado'}
         </span>
       </nav>
 
@@ -28,15 +33,18 @@ export default function UserCreateHeader({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center shrink-0">
-            <UserPlus size={20} className="text-brand-blue" strokeWidth={2} />
+            {isEdit
+              ? <UserCog size={20} className="text-brand-blue" strokeWidth={2} />
+              : <UserPlus size={20} className="text-brand-blue" strokeWidth={2} />}
           </div>
           <div>
             <h1 className="text-2xl lg:text-[28px] font-bold text-brand-black dark:text-dark-text tracking-tight leading-tight">
-              Nuevo empleado
+              {isEdit ? 'Editar empleado' : 'Nuevo empleado'}
             </h1>
             <p className="text-sm text-gray-500 dark:text-dark-muted mt-1 max-w-xl">
-              Crea la cuenta de acceso del empleado y define su contraseña inicial.
-              El correo será su nombre de usuario.
+              {isEdit
+                ? 'Modifica la información del empleado. Los cambios se aplican inmediatamente.'
+                : 'Crea la cuenta de acceso del empleado y define su contraseña inicial. El correo será su nombre de usuario.'}
             </p>
           </div>
         </div>
@@ -58,7 +66,7 @@ export default function UserCreateHeader({
             loading={submitting}
             disabled={disabled}
           >
-            Crear empleado
+            {isEdit ? 'Guardar cambios' : 'Crear empleado'}
           </Button>
         </div>
       </div>

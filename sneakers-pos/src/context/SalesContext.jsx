@@ -1,85 +1,131 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+// src/context/SalesContext.jsx
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { salesRepo } from '../repositories/salesRepo'
+import { useNetwork } from './NetworkContext'
 
 const SalesContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-sales'
-
 /**
- * Historial de ventas.
- * Las ventas son INMUTABLES: si hay un error se crea una devolución o cancelación.
+ * Historial de ventas con estrategia offline-first.
+ *
+ * - Al montar: carga ventas locales + sincroniza con Supabase en background
+ * - Al crear/actualizar/cancelar: actualiza local + encola sync
+ * - Al reconectar: re-sincroniza desde Supabase
  */
 export function SalesProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [sales, setSales] = useState([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setSales(JSON.parse(raw))
-    } catch (e) {
-      console.warn('No se pudo leer el historial de ventas:', e)
-    } finally {
-      setLoading(false)
+      const list = await salesRepo.getAllLocal()
+      if (mountedRef.current) setSales(list)
+      return list
+    } catch (err) {
+      console.error('❌ Error cargando ventas locales:', err)
+      return []
     }
   }, [])
 
-  useEffect(() => {
-    if (loading) return
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sales))
-    } catch (e) {
-      console.warn('No se pudo guardar el historial de ventas:', e)
+      await salesRepo.syncFromSupabase()
+      await loadLocal()
+    } catch (err) {
+      console.warn('⚠️ Sync de ventas falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [sales, loading])
+  }, [isOnline, loadLocal])
+
+  // Al montar
+  useEffect(() => {
+    mountedRef.current = true
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+      if (isOnline) syncRemote()
+    }
+    init()
+    return () => { mountedRef.current = false }
+  }, [loadLocal, syncRemote, isOnline])
+
+  // Al reconectar
+  useEffect(() => {
+    if (!isOnline) return
+    const timer = setTimeout(() => syncRemote(), 1500)
+    return () => clearTimeout(timer)
+  }, [isOnline, syncRemote])
+
+  // -----------------------------------------------------------------
+  // API
+  // -----------------------------------------------------------------
 
   const getSaleById = useCallback(
     (id) => sales.find((s) => s.id === id || s.folio === id) || null,
     [sales],
   )
 
-  /**
-   * Registra una venta nueva. Se llama desde el POS.
-   */
-  const createSale = useCallback((payload) => {
-    const now = new Date().toISOString()
-    const id = `sale_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const folio = `VTA-${String(Date.now()).slice(-6)}`
+  const getSalesByCashSession = useCallback(
+    (cashSessionId) => sales.filter((s) => s.cashSessionId === cashSessionId),
+    [sales],
+  )
 
-    const sale = {
-      id,
-      folio,
-      createdAt: now,
-      status: 'completed', // completed | partial_return | returned | cancelled
-      ...payload,
-    }
-    setSales((list) => [sale, ...list])
-    return sale
+  const createSale = useCallback(async (payload) => {
+    // Genera folio local si no viene
+    const folio = payload.folio || await salesRepo.nextLocalFolio()
+    const created = await salesRepo.create({ ...payload, folio })
+
+    setSales((list) => [created, ...list])
+    return created
   }, [])
 
-  /**
-   * Actualiza el estado de una venta (devolución, cancelación, etc.)
-   */
-  const updateSale = useCallback((id, patch) => {
-    let updated = null
-    setSales((list) =>
-      list.map((s) => {
-        if (s.id !== id) return s
-        updated = { ...s, ...patch, updatedAt: new Date().toISOString() }
-        return updated
-      }),
-    )
+  const updateSale = useCallback(async (id, patch) => {
+    const updated = await salesRepo.update(id, patch)
+    setSales((list) => list.map((s) => (s.id === id ? updated : s)))
     return updated
   }, [])
 
-  const clearAll = useCallback(() => setSales([]), [])
+  const cancelSale = useCallback(async (id, options) => {
+    const updated = await salesRepo.cancel(id, options)
+    setSales((list) => list.map((s) => (s.id === id ? updated : s)))
+    return updated
+  }, [])
+
+  const deleteSale = useCallback(async (id) => {
+    await salesRepo.delete(id)
+    setSales((list) => list.filter((s) => s.id !== id))
+  }, [])
+
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
 
   const value = {
     sales,
     loading,
+    syncing,
     getSaleById,
+    getSalesByCashSession,
     createSale,
     updateSale,
-    clearAll,
+    cancelSale,
+    deleteSale,
+    refresh,
   }
 
   return (

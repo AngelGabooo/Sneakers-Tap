@@ -1,40 +1,98 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+// src/context/ProductsContext.jsx
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { productsRepo } from '../repositories/productsRepo'
+import { useNetwork } from './NetworkContext'
 
 const ProductsContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-products'
-
 /**
- * Contexto de productos.
- * Actualmente usa localStorage como almacén temporal para pruebas locales.
- * Cuando conectes el backend, solo reemplaza el cuerpo de las funciones
- * por llamadas fetch/axios y mantén la misma firma.
+ * Contexto de productos con estrategia offline-first.
+ *
+ * - Al montar: carga productos locales (rápido) + sincroniza con Supabase en background
+ * - Al crear/editar/borrar: actualiza local + encola para sync
+ * - Cuando vuelve internet: re-sincroniza desde Supabase
  */
 export function ProductsProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  // Cargar de localStorage al arrancar
-  useEffect(() => {
+  // -------------------------------------------------------------
+  // Cargar productos locales (rápido, siempre funciona)
+  // -------------------------------------------------------------
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setProducts(JSON.parse(raw))
-    } catch (e) {
-      console.warn('No se pudo leer el almacén de productos:', e)
-    } finally {
-      setLoading(false)
+      const list = await productsRepo.getAllLocal()
+      if (mountedRef.current) {
+        setProducts(list)
+      }
+      return list
+    } catch (err) {
+      console.error('❌ Error cargando productos locales:', err)
+      return []
     }
   }, [])
 
-  // Persistir cada vez que cambian
-  useEffect(() => {
-    if (loading) return
+  // -------------------------------------------------------------
+  // Sincronizar desde Supabase (background)
+  // -------------------------------------------------------------
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(products))
-    } catch (e) {
-      console.warn('No se pudo guardar el almacén de productos:', e)
+      await productsRepo.syncFromSupabase()
+      await loadLocal()
+    } catch (err) {
+      console.warn('⚠️ Sync de productos falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [products, loading])
+  }, [isOnline, loadLocal])
+
+  // -------------------------------------------------------------
+  // Al montar: cargar local + sync remoto
+  // -------------------------------------------------------------
+  useEffect(() => {
+    mountedRef.current = true
+
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+
+      // Sync remoto en background (no bloquea)
+      if (isOnline) {
+        syncRemote()
+      }
+    }
+
+    init()
+
+    return () => {
+      mountedRef.current = false
+    }
+  }, [loadLocal, syncRemote, isOnline])
+
+  // -------------------------------------------------------------
+  // Cuando vuelve internet → re-sincronizar
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!isOnline) return
+    // Delay para no saturar al reconectar
+    const timer = setTimeout(() => {
+      syncRemote()
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [isOnline, syncRemote])
 
   // -------------------------------------------------------------
   // API expuesta
@@ -45,51 +103,79 @@ export function ProductsProvider({ children }) {
     [products],
   )
 
-  const createProduct = useCallback((payload) => {
-    const now = new Date().toISOString()
-    const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const product = {
-      id,
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: 'Henry',
-      ...payload,
-    }
-    setProducts((list) => [product, ...list])
-    return product
+  const getProductByCode = useCallback(
+    (code) => {
+      if (!code) return null
+      return (
+        products.find((p) => p.sku === code || p.barcode === code) || null
+      )
+    },
+    [products],
+  )
+
+  /**
+   * Crea un producto local + encola sync.
+   * Retorna inmediatamente.
+   */
+  const createProduct = useCallback(async (payload) => {
+    const { variants, ...product } = payload
+    const created = await productsRepo.create(product, variants || [])
+    // Actualizar estado local inmediatamente
+    setProducts((list) => [created, ...list])
+    return created
   }, [])
 
-  const updateProduct = useCallback((id, payload) => {
-    let updated = null
+  /**
+   * Actualiza un producto local + encola sync.
+   */
+  const updateProduct = useCallback(async (id, payload) => {
+    const { variants, ...product } = payload
+    const updated = await productsRepo.update(id, product, variants)
+
     setProducts((list) =>
-      list.map((p) => {
-        if (p.id !== id) return p
-        updated = {
-          ...p,
-          ...payload,
-          updatedAt: new Date().toISOString(),
-          updatedBy: 'Henry',
-        }
-        return updated
-      }),
+      list.map((p) => (p.id === id ? updated : p)),
     )
     return updated
   }, [])
 
-  const deleteProduct = useCallback((id) => {
+  /**
+   * Elimina un producto local + encola sync.
+   */
+  const deleteProduct = useCallback(async (id) => {
+    await productsRepo.delete(id)
     setProducts((list) => list.filter((p) => p.id !== id))
   }, [])
 
-  const clearAll = useCallback(() => setProducts([]), [])
+  /**
+   * Cambia el status (active/inactive).
+   */
+  const toggleProductStatus = useCallback(async (id, status) => {
+    const updated = await productsRepo.toggleStatus(id, status)
+    setProducts((list) =>
+      list.map((p) => (p.id === id ? { ...p, status } : p)),
+    )
+    return updated
+  }, [])
+
+  /**
+   * Fuerza re-sync manual.
+   */
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
 
   const value = {
     products,
     loading,
+    syncing,
     getProductById,
+    getProductByCode,
     createProduct,
     updateProduct,
     deleteProduct,
-    clearAll,
+    toggleProductStatus,
+    refresh,
   }
 
   return (

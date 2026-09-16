@@ -5,6 +5,14 @@ export default function TicketPreview({ settings }) {
   const width = ticket.width === 58 ? 220 : 300
   const is58 = ticket.width === 58
 
+  const storeName = ticket.header.name || store.commercialName || ''
+  const hasAnyHeader =
+    storeName || ticket.header.tagline ||
+    (ticket.header.showAddress && store.address?.street) ||
+    (ticket.header.showPhone && store.phone) ||
+    (ticket.header.showEmail && store.email) ||
+    (ticket.header.showRfc && store.rfc)
+
   return (
     <div className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-5">
       <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text mb-3">
@@ -32,9 +40,9 @@ export default function TicketPreview({ settings }) {
                 style={{ maxHeight: is58 ? '40px' : '56px', maxWidth: '80%' }}
               />
             )}
-            <div className="font-bold text-base tracking-wider">
-              {ticket.header.name || store.commercialName || 'SNEAKERS'}
-            </div>
+            {storeName && (
+              <div className="font-bold text-base tracking-wider">{storeName}</div>
+            )}
             {ticket.header.tagline && (
               <div className="mt-0.5" style={{ fontSize: '0.9em' }}>
                 {ticket.header.tagline}
@@ -45,9 +53,9 @@ export default function TicketPreview({ settings }) {
           {/* Datos de la tienda */}
           {ticket.header.showAddress && store.address?.street && (
             <div className="text-center" style={{ fontSize: '0.85em' }}>
-              {store.address.street}
-              {store.address.exteriorNumber ? ` ${store.address.exteriorNumber}` : ''}
-              {store.address.neighborhood ? `, ${store.address.neighborhood}` : ''}
+              {[store.address.street, store.address.exteriorNumber, store.address.neighborhood]
+                .filter(Boolean)
+                .join(' ')}
               <br />
               {[store.address.city, store.address.state].filter(Boolean).join(', ')}
               {store.address.postalCode ? `, ${store.address.postalCode}` : ''}
@@ -69,31 +77,23 @@ export default function TicketPreview({ settings }) {
             </div>
           )}
 
+          {!hasAnyHeader && (
+            <div className="text-center text-gray-400" style={{ fontSize: '0.8em' }}>
+              (Sin encabezado configurado)
+            </div>
+          )}
+
           <Divider />
 
           {/* Datos de venta */}
           <div style={{ fontSize: '0.9em' }}>
-            {ticket.sale.showNumber && (
-              <Row label="Venta:" value="#VTA-000000" bold />
-            )}
-            {ticket.sale.showDate && (
-              <Row label="Fecha:" value="--/--/----" />
-            )}
-            {ticket.sale.showTime && (
-              <Row label="Hora:" value="--:--" />
-            )}
-            {ticket.sale.showSeller && (
-              <Row label="Vendedor:" value="—" />
-            )}
-            {ticket.sale.showCash && (
-              <Row label="Caja:" value="#---" />
-            )}
-            {ticket.sale.showBranch && (
-              <Row label="Sucursal:" value="—" />
-            )}
-            {ticket.sale.showCustomer && (
-              <Row label="Cliente:" value="Venta general" />
-            )}
+            {ticket.sale.showNumber   && <Row label="Venta:"    value="#VTA-000000" bold />}
+            {ticket.sale.showDate     && <Row label="Fecha:"    value="--/--/----" />}
+            {ticket.sale.showTime     && <Row label="Hora:"     value="--:--" />}
+            {ticket.sale.showSeller   && <Row label="Vendedor:" value="—" />}
+            {ticket.sale.showCash     && <Row label="Caja:"     value="#---" />}
+            {ticket.sale.showBranch   && <Row label="Sucursal:" value="—" />}
+            {ticket.sale.showCustomer && <Row label="Cliente:"  value="Venta general" />}
           </div>
 
           <Divider />
@@ -101,9 +101,7 @@ export default function TicketPreview({ settings }) {
           {/* Productos (placeholders) */}
           <div style={{ fontSize: '0.9em' }}>
             <div className="font-bold">Producto de ejemplo</div>
-            <div style={{ fontSize: '0.85em' }}>
-              Talla · Color
-            </div>
+            <div style={{ fontSize: '0.85em' }}>Talla · Color</div>
             {ticket.products.showSku && (
               <div style={{ fontSize: '0.8em' }}>SKU: ---</div>
             )}
@@ -141,23 +139,20 @@ export default function TicketPreview({ settings }) {
           {/* Footer */}
           <div className="text-center" style={{ fontSize: '0.9em' }}>
             {ticket.footer.showThankYou && ticket.footer.thankYouMessage && (
-              <div className="font-bold mb-1">
-                {ticket.footer.thankYouMessage}
-              </div>
+              <div className="font-bold mb-1">{ticket.footer.thankYouMessage}</div>
             )}
             {ticket.footer.showReturnPolicy && ticket.footer.returnPolicy && (
-              <div style={{ fontSize: '0.85em' }}>
-                {ticket.footer.returnPolicy}
-              </div>
+              <div style={{ fontSize: '0.85em' }}>{ticket.footer.returnPolicy}</div>
             )}
             {ticket.footer.showWebsite && store.website && (
               <div style={{ marginTop: '2mm' }}>{store.website}</div>
             )}
-            {ticket.footer.showQr && ticket.qr.enabled && ticket.qr.url && (
-              <div className="mt-2 flex justify-center">
-                <div className="w-16 h-16 bg-gray-200 flex items-center justify-center text-[8px] text-gray-500">
-                  QR
-                </div>
+            {!ticket.footer.showThankYou &&
+             !ticket.footer.showReturnPolicy &&
+             !ticket.footer.showWebsite &&
+             !storeName && (
+              <div className="text-gray-400" style={{ fontSize: '0.8em' }}>
+                (Sin pie configurado)
               </div>
             )}
           </div>
