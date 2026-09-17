@@ -301,16 +301,21 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
         </button>
 
         {notifOpen && (
-          <div
-            role="menu"
-            className="
-              absolute right-0 top-full mt-3 w-[400px] max-w-[calc(100vw-1.5rem)] z-50
-              bg-white dark:bg-dark-card
-              border border-gray-200 dark:border-dark-border
-              rounded-2xl shadow-2xl shadow-black/10 dark:shadow-black/40
-              overflow-hidden
-            "
-          >
+  <div
+    role="menu"
+    className="
+      /* ---------- MÓVIL: panel anclado a la pantalla ---------- */
+      fixed inset-x-2 top-[calc(env(safe-area-inset-top,0px)+4.5rem)] bottom-4 z-50
+      flex flex-col
+      bg-white dark:bg-dark-card
+      border border-gray-200 dark:border-dark-border
+      rounded-2xl shadow-2xl shadow-black/10 dark:shadow-black/40
+      overflow-hidden
+      /* ---------- DESKTOP: dropdown clásico ---------- */
+      lg:absolute lg:inset-x-auto lg:right-0 lg:top-full lg:bottom-auto lg:mt-3
+      lg:w-[400px] lg:max-h-[80vh]
+    "
+  >
             {/* Header */}
             <div className="px-5 py-4 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-blue-50/60 to-transparent dark:from-blue-950/20">
               <div className="flex items-center justify-between">
@@ -456,7 +461,7 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
             )}
 
             {/* Lista */}
-            <div className="max-h-[420px] overflow-y-auto">
+<div className="flex-1 min-h-0 overflow-y-auto lg:max-h-[420px] lg:flex-none">
               {notifications.length === 0 ? (
                 <div className="text-center py-14 px-4">
                   <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-dark-card mx-auto mb-3 flex items-center justify-center">
