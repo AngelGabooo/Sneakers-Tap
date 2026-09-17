@@ -11,45 +11,36 @@ const CORS_HEADERS = {
 }
 
 serve(async (req) => {
-  // Manejar preflight OPTIONS (CORS)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS })
   }
 
   try {
-    // 1. Extraer token del header
+    // 1. Verificar autenticación del caller
     const authHeader = req.headers.get('Authorization') || ''
     const token = authHeader.replace('Bearer ', '').trim()
 
     if (!token) {
-      console.error('❌ No hay token en Authorization')
       return new Response(
         JSON.stringify({ error: 'No autenticado: falta el token' }),
         { status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )
     }
 
-    // 2. Verificar token usando el service_role (más confiable)
     const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
+      auth: { autoRefreshToken: false, persistSession: false },
     })
 
     const { data: { user: caller }, error: authError } = await supabaseAdmin.auth.getUser(token)
 
     if (authError || !caller) {
-      console.error('❌ Token inválido:', authError?.message)
       return new Response(
-        JSON.stringify({ error: 'No autenticado: ' + (authError?.message || 'token inválido') }),
+        JSON.stringify({ error: 'No autenticado: ' + (authError?.message || '') }),
         { status: 401, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )
     }
 
-    console.log('✅ Caller autenticado:', caller.email)
-
-    // 3. Verificar que el caller sea admin
+    // 2. Verificar que el caller sea admin
     const { data: callerProfile } = await supabaseAdmin
       .from('profiles')
       .select('role_id, role:roles(name)')
@@ -58,42 +49,52 @@ serve(async (req) => {
 
     const callerRole = callerProfile?.role?.name
     if (callerRole !== 'Administrador' && callerRole !== 'Gerente') {
-      console.error('❌ Caller no es admin:', callerRole)
       return new Response(
-        JSON.stringify({ error: 'Solo admins pueden crear usuarios' }),
+        JSON.stringify({ error: 'Solo admins pueden restablecer contraseñas' }),
         { status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )
     }
 
-    // 4. Parsear body
-    const { email, password, metadata } = await req.json()
+    // 3. Parsear body
+    const { userId, newPassword } = await req.json()
 
-    if (!email || !password) {
+    if (!userId || !newPassword) {
       return new Response(
-        JSON.stringify({ error: 'Email y password obligatorios' }),
+        JSON.stringify({ error: 'userId y newPassword obligatorios' }),
         { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )
     }
 
-    // 5. Crear usuario con admin API
-    const { data, error } = await supabaseAdmin.auth.admin.createUser({
-      email: email.trim().toLowerCase(),
-      password,
-      email_confirm: true,
-      user_metadata: metadata || {},
+    if (newPassword.length < 8) {
+      return new Response(
+        JSON.stringify({ error: 'La contraseña debe tener al menos 8 caracteres' }),
+        { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    // 4. Actualizar la contraseña
+    const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
     })
 
     if (error) {
-      console.error('❌ Error creando usuario:', error)
+      console.error('❌ Error actualizando contraseña:', error)
       return new Response(
         JSON.stringify({ error: error.message }),
         { status: 400, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
       )
     }
 
-    console.log('✅ Usuario creado:', data.user?.email)
+    console.log(`✅ Contraseña actualizada para: ${data.user?.email}`)
+
+    // 5. Marcar mustChangePassword en profile
+    await supabaseAdmin
+      .from('profiles')
+      .update({ must_change_password: true })
+      .eq('id', userId)
+
     return new Response(
-      JSON.stringify({ user: data.user }),
+      JSON.stringify({ ok: true, user: data.user }),
       { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
     )
   } catch (err: any) {

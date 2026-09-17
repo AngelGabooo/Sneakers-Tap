@@ -25,9 +25,7 @@ export const authService = {
   },
 
   /**
-   * Registra un usuario nuevo.
-   * ⚠️ Nota: en Supabase Auth, signUp() inicia sesión automáticamente.
-   * Para crear usuarios SIN cambiar la sesión actual, usar `signUpAdmin` con Admin API.
+   * Registra un usuario nuevo (uso personal).
    */
   async signUp({ email, password, metadata = {} }) {
     const { data, error } = await supabase.auth.signUp({
@@ -44,29 +42,126 @@ export const authService = {
   },
 
   /**
-   * Crea un usuario desde el panel de admin SIN cerrar la sesión actual.
-   * Usa una Edge Function con service_role para crear usuarios.
-   *
-   * ⚠️ Requiere que exista la Edge Function `create-user` deployada.
+   * ⭐ Crea un usuario desde el panel de admin SIN cerrar la sesión actual.
    */
   async signUpAdmin({ email, password, metadata = {} }) {
-    const { data, error } = await supabase.functions.invoke('create-user', {
-      body: {
-        email: email.trim().toLowerCase(),
-        password,
-        metadata,
-      },
-    })
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      if (!session?.access_token) {
+        throw new Error('No hay sesión activa. Vuelve a iniciar sesión.')
+      }
 
-    if (error) throw new Error(error.message || 'Error al crear usuario')
-    if (data?.error) throw new Error(data.error)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-    return data
+      if (!supabaseUrl || !anonKey) {
+        throw new Error('Faltan las variables de entorno de Supabase.')
+      }
+
+      const url = `${supabaseUrl}/functions/v1/create-user`
+
+      console.log('📤 Llamando create-user con:', { email, metadata })
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          metadata,
+        }),
+      })
+
+      const text = await res.text()
+      let data = null
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        data = { error: text || 'Respuesta inválida del servidor' }
+      }
+
+      if (!res.ok) {
+        const errorMsg = data?.error || `Error ${res.status}: ${res.statusText}`
+        console.error('❌ create-user error:', errorMsg, data)
+        throw new Error(errorMsg)
+      }
+
+      if (data?.error) {
+        throw new Error(data.error)
+      }
+
+      console.log('✅ Usuario creado en Auth:', data?.user?.email)
+      return data
+    } catch (err) {
+      console.error('❌ signUpAdmin error:', err)
+      throw err
+    }
   },
 
   /**
-   * Cierra la sesión actual.
+   * ⭐ Restablece la contraseña de otro usuario (solo admin/gerente).
+   * Usa la Edge Function `reset-password`.
    */
+  async resetUserPassword({ userId, newPassword }) {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) throw sessionError
+      if (!session?.access_token) {
+        throw new Error('No hay sesión activa. Vuelve a iniciar sesión.')
+      }
+
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+      if (!supabaseUrl || !anonKey) {
+        throw new Error('Faltan las variables de entorno de Supabase.')
+      }
+
+      const url = `${supabaseUrl}/functions/v1/reset-password`
+
+      console.log('📤 Llamando reset-password para user:', userId)
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': anonKey,
+        },
+        body: JSON.stringify({ userId, newPassword }),
+      })
+
+      const text = await res.text()
+      let data = null
+      try {
+        data = text ? JSON.parse(text) : null
+      } catch {
+        data = { error: text || 'Respuesta inválida del servidor' }
+      }
+
+      if (!res.ok) {
+        const errorMsg = data?.error || `Error ${res.status}: ${res.statusText}`
+        console.error('❌ reset-password error:', errorMsg, data)
+        throw new Error(errorMsg)
+      }
+
+      if (data?.error) {
+        throw new Error(data.error)
+      }
+
+      console.log('✅ Contraseña restablecida para:', data?.user?.email)
+      return data
+    } catch (err) {
+      console.error('❌ resetUserPassword error:', err)
+      throw err
+    }
+  },
+
   async signOut() {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
@@ -93,9 +188,6 @@ export const authService = {
     return true
   },
 
-  /**
-   * Actualiza la contraseña del usuario autenticado.
-   */
   async updatePassword(newPassword) {
     const { data, error } = await supabase.auth.updateUser({
       password: newPassword,

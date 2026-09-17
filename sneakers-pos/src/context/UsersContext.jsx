@@ -1,6 +1,7 @@
 // src/context/UsersContext.jsx
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { usersRepo } from '../repositories/usersRepo'
+import { authService } from '../services/authService'
 import { useNetwork } from './NetworkContext'
 
 const UsersContext = createContext(null)
@@ -112,18 +113,26 @@ export function UsersProvider({ children }) {
   }, [])
 
   // ---------------------------------------------------------
-  // Restablecer acceso (contraseña)
+  // ⭐ Restablecer acceso (contraseña) — IMPLEMENTADO
   // ---------------------------------------------------------
   const resetAccess = useCallback(async (id, newPassword) => {
     try {
-      const { authService } = await import('../services/authService')
-      // Nota: solo funciona para el propio usuario; para otros requiere Admin API
-      // Aquí lo dejamos como "pendiente" si es otro usuario
-      console.warn('⚠️ resetAccess: pendiente de implementar con Admin API')
-      return { ok: false, reason: 'no-implementado' }
+      const result = await authService.resetUserPassword({
+        userId: id,
+        newPassword,
+      })
+
+      // Actualizar el estado local para marcar mustChangePassword
+      setUsers((list) =>
+        list.map((u) =>
+          u.id === id ? { ...u, mustChangePassword: true } : u,
+        ),
+      )
+
+      return { ok: true, user: result.user }
     } catch (err) {
-      console.error('Error resetAccess:', err)
-      return { ok: false, reason: err.message }
+      console.error('❌ resetAccess error:', err)
+      return { ok: false, error: err.message }
     }
   }, [])
 
