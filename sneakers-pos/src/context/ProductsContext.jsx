@@ -9,15 +9,17 @@ import {
 } from 'react'
 import { productsRepo } from '../repositories/productsRepo'
 import { useNetwork } from './NetworkContext'
+import { VARIANT_STOCK_CHANGED } from '../utils/events'
 
 const ProductsContext = createContext(null)
 
 /**
  * Contexto de productos con estrategia offline-first.
  *
- * - Al montar: carga productos locales (rápido) + sincroniza con Supabase en background
- * - Al crear/editar/borrar: actualiza local + encola para sync
- * - Cuando vuelve internet: re-sincroniza desde Supabase
+ * - Al montar: carga productos locales + sincroniza con Supabase
+ * - Al crear/editar/borrar: actualiza local + encola sync
+ * - Al vender (VARIANT_STOCK_CHANGED): recarga locales para reflejar stock
+ * - Al volver internet: re-sincroniza
  */
 export function ProductsProvider({ children }) {
   const { isOnline } = useNetwork()
@@ -26,15 +28,10 @@ export function ProductsProvider({ children }) {
   const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
 
-  // -------------------------------------------------------------
-  // Cargar productos locales (rápido, siempre funciona)
-  // -------------------------------------------------------------
   const loadLocal = useCallback(async () => {
     try {
       const list = await productsRepo.getAllLocal()
-      if (mountedRef.current) {
-        setProducts(list)
-      }
+      if (mountedRef.current) setProducts(list)
       return list
     } catch (err) {
       console.error('❌ Error cargando productos locales:', err)
@@ -42,9 +39,6 @@ export function ProductsProvider({ children }) {
     }
   }, [])
 
-  // -------------------------------------------------------------
-  // Sincronizar desde Supabase (background)
-  // -------------------------------------------------------------
   const syncRemote = useCallback(async () => {
     if (!isOnline) return
     setSyncing(true)
@@ -58,9 +52,7 @@ export function ProductsProvider({ children }) {
     }
   }, [isOnline, loadLocal])
 
-  // -------------------------------------------------------------
-  // Al montar: cargar local + sync remoto
-  // -------------------------------------------------------------
+  // Al montar
   useEffect(() => {
     mountedRef.current = true
 
@@ -68,11 +60,7 @@ export function ProductsProvider({ children }) {
       setLoading(true)
       await loadLocal()
       if (mountedRef.current) setLoading(false)
-
-      // Sync remoto en background (no bloquea)
-      if (isOnline) {
-        syncRemote()
-      }
+      if (isOnline) syncRemote()
     }
 
     init()
@@ -82,22 +70,25 @@ export function ProductsProvider({ children }) {
     }
   }, [loadLocal, syncRemote, isOnline])
 
-  // -------------------------------------------------------------
-  // Cuando vuelve internet → re-sincronizar
-  // -------------------------------------------------------------
+  // Al reconectar
   useEffect(() => {
     if (!isOnline) return
-    // Delay para no saturar al reconectar
-    const timer = setTimeout(() => {
-      syncRemote()
-    }, 1500)
+    const timer = setTimeout(() => syncRemote(), 1500)
     return () => clearTimeout(timer)
   }, [isOnline, syncRemote])
 
-  // -------------------------------------------------------------
-  // API expuesta
-  // -------------------------------------------------------------
+  // ⭐ Escuchar cambios de stock (disparados al vender/ajustar)
+  useEffect(() => {
+    const handler = () => {
+      console.log('🔄 Refrescando productos por cambio de stock')
+      loadLocal()
+    }
 
+    window.addEventListener(VARIANT_STOCK_CHANGED, handler)
+    return () => window.removeEventListener(VARIANT_STOCK_CHANGED, handler)
+  }, [loadLocal])
+
+  // API
   const getProductById = useCallback(
     (id) => products.find((p) => p.id === id) || null,
     [products],
@@ -106,49 +97,30 @@ export function ProductsProvider({ children }) {
   const getProductByCode = useCallback(
     (code) => {
       if (!code) return null
-      return (
-        products.find((p) => p.sku === code || p.barcode === code) || null
-      )
+      return products.find((p) => p.sku === code || p.barcode === code) || null
     },
     [products],
   )
 
-  /**
-   * Crea un producto local + encola sync.
-   * Retorna inmediatamente.
-   */
   const createProduct = useCallback(async (payload) => {
     const { variants, ...product } = payload
     const created = await productsRepo.create(product, variants || [])
-    // Actualizar estado local inmediatamente
     setProducts((list) => [created, ...list])
     return created
   }, [])
 
-  /**
-   * Actualiza un producto local + encola sync.
-   */
   const updateProduct = useCallback(async (id, payload) => {
     const { variants, ...product } = payload
     const updated = await productsRepo.update(id, product, variants)
-
-    setProducts((list) =>
-      list.map((p) => (p.id === id ? updated : p)),
-    )
+    setProducts((list) => list.map((p) => (p.id === id ? updated : p)))
     return updated
   }, [])
 
-  /**
-   * Elimina un producto local + encola sync.
-   */
   const deleteProduct = useCallback(async (id) => {
     await productsRepo.delete(id)
     setProducts((list) => list.filter((p) => p.id !== id))
   }, [])
 
-  /**
-   * Cambia el status (active/inactive).
-   */
   const toggleProductStatus = useCallback(async (id, status) => {
     const updated = await productsRepo.toggleStatus(id, status)
     setProducts((list) =>
@@ -157,9 +129,6 @@ export function ProductsProvider({ children }) {
     return updated
   }, [])
 
-  /**
-   * Fuerza re-sync manual.
-   */
   const refresh = useCallback(async () => {
     await loadLocal()
     await syncRemote()

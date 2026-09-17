@@ -1,78 +1,124 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+// src/context/WholesaleContext.jsx
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { wholesaleRepo } from '../repositories/wholesaleRepo'
+import { useNetwork } from './NetworkContext'
 
 const WholesaleContext = createContext(null)
 
-const STORAGE_KEY = 'sneakers-wholesale'
-
-/**
- * Directorio de clientes mayoristas.
- * Actualmente persiste en localStorage. Cuando conectes backend,
- * reemplaza el cuerpo de las funciones por llamadas HTTP.
- */
 export function WholesaleProvider({ children }) {
+  const { isOnline } = useNetwork()
   const [wholesales, setWholesales] = useState([])
   const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const mountedRef = useRef(true)
 
-  useEffect(() => {
+  // ---------------------------------------------------------
+  // Cargar locales
+  // ---------------------------------------------------------
+  const loadLocal = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setWholesales(JSON.parse(raw))
-    } catch (e) {
-      console.warn('No se pudo leer el directorio de mayoristas:', e)
-    } finally {
-      setLoading(false)
+      const list = await wholesaleRepo.getAllLocal()
+      if (mountedRef.current) setWholesales(list)
+      return list
+    } catch (err) {
+      console.error('❌ Error cargando mayoristas locales:', err)
+      return []
     }
   }, [])
 
-  useEffect(() => {
-    if (loading) return
+  // ---------------------------------------------------------
+  // Sync remoto
+  // ---------------------------------------------------------
+  const syncRemote = useCallback(async () => {
+    if (!isOnline) return
+    setSyncing(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(wholesales))
-    } catch (e) {
-      console.warn('No se pudo guardar el directorio de mayoristas:', e)
+      await wholesaleRepo.syncFromSupabase()
+      await loadLocal()
+    } catch (err) {
+      console.warn('⚠️ Sync de mayoristas falló:', err.message)
+    } finally {
+      if (mountedRef.current) setSyncing(false)
     }
-  }, [wholesales, loading])
+  }, [isOnline, loadLocal])
 
+  // Al montar
+  useEffect(() => {
+    mountedRef.current = true
+    async function init() {
+      setLoading(true)
+      await loadLocal()
+      if (mountedRef.current) setLoading(false)
+      if (isOnline) syncRemote()
+    }
+    init()
+    return () => { mountedRef.current = false }
+  }, [loadLocal, syncRemote, isOnline])
+
+  // Al reconectar
+  useEffect(() => {
+    if (!isOnline) return
+    const timer = setTimeout(() => syncRemote(), 1500)
+    return () => clearTimeout(timer)
+  }, [isOnline, syncRemote])
+
+  // ---------------------------------------------------------
+  // API
+  // ---------------------------------------------------------
   const getWholesaleById = useCallback(
     (id) => wholesales.find((w) => w.id === id) || null,
     [wholesales],
   )
 
-  const createWholesale = useCallback((payload) => {
-    const now = new Date().toISOString()
-    const id = `MAY-${String(Date.now()).slice(-5)}`
-    const record = {
-      id,
-      createdAt: now,
-      updatedAt: now,
-      status: 'active',
-      ...payload,
-    }
-    setWholesales((list) => [record, ...list])
-    return record
+  const getWholesaleByCode = useCallback(
+    (code) =>
+      wholesales.find(
+        (w) => (w.code || '').toLowerCase() === (code || '').toLowerCase(),
+      ) || null,
+    [wholesales],
+  )
+
+  const createWholesale = useCallback(async (payload) => {
+    const created = await wholesaleRepo.create(payload)
+    setWholesales((list) => [created, ...list])
+    return created
   }, [])
 
-  const updateWholesale = useCallback((id, patch) => {
-    let updated = null
+  const updateWholesale = useCallback(async (id, patch) => {
+    const updated = await wholesaleRepo.update(id, patch)
     setWholesales((list) =>
-      list.map((w) => {
-        if (w.id !== id) return w
-        updated = { ...w, ...patch, updatedAt: new Date().toISOString() }
-        return updated
-      }),
+      list.map((w) => (w.id === id ? { ...w, ...patch } : w)),
     )
     return updated
   }, [])
 
-  const clearAll = useCallback(() => setWholesales([]), [])
+  const deleteWholesale = useCallback(async (id) => {
+    await wholesaleRepo.delete(id)
+    setWholesales((list) => list.filter((w) => w.id !== id))
+  }, [])
+
+  const refresh = useCallback(async () => {
+    await loadLocal()
+    await syncRemote()
+  }, [loadLocal, syncRemote])
 
   const value = {
     wholesales,
     loading,
+    syncing,
     getWholesaleById,
+    getWholesaleByCode,
     createWholesale,
     updateWholesale,
-    clearAll,
+    deleteWholesale,
+    refresh,
   }
 
   return (

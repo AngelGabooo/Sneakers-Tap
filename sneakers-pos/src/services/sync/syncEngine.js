@@ -1,7 +1,8 @@
 // src/services/sync/syncEngine.js
 import { syncQueue } from './syncQueue'
 import { runHandler } from './handlers'
-import { STATUS } from './operationTypes'
+import { STATUS, OP } from './operationTypes'
+import { dbPromise, STORES } from '../../lib/db'
 
 /**
  * Motor de sincronización.
@@ -36,6 +37,34 @@ function emit(event) {
 export function subscribe(callback) {
   listeners.add(callback)
   return () => listeners.delete(callback)
+}
+
+/**
+ * Remapea el ID local de un registro de auditoría al ID real de Supabase.
+ * Se llama cuando el handler devuelve `serverId` tras un CREATE_AUDIT_LOG.
+ */
+async function remapAuditId(localId, serverId) {
+  try {
+    const db = await dbPromise
+    const local = await db.get(STORES.AUDIT_LOG, localId)
+    if (!local) return
+
+    if (local.id !== serverId) {
+      // Borrar el registro con ID temporal
+      await db.delete(STORES.AUDIT_LOG, local.id)
+      // Guardar con el ID real de Supabase
+      await db.put(STORES.AUDIT_LOG, {
+        ...local,
+        id: serverId,
+        auditId: `AUD-${(local.entity || 'EVT').toUpperCase()}-${String(serverId).slice(-8).toUpperCase()}`,
+        syncStatus: 'synced',
+      })
+    } else {
+      await db.put(STORES.AUDIT_LOG, { ...local, syncStatus: 'synced' })
+    }
+  } catch (err) {
+    console.warn('⚠️ No se pudo remapear el ID de auditoría:', err)
+  }
 }
 
 /**
@@ -74,6 +103,15 @@ export async function processQueue() {
       const result = await runHandler(op)
 
       if (result.ok) {
+        // ⭐ Si el handler devolvió un serverId y es CREATE_AUDIT_LOG,
+        //    remapear el registro local (ID temporal → UUID Supabase)
+        if (result.serverId && op.type === OP.CREATE_AUDIT_LOG) {
+          const localId = op.payload?.event?.id
+          if (localId) {
+            await remapAuditId(localId, result.serverId)
+          }
+        }
+
         await syncQueue.markSynced(op.id)
         succeeded++
         console.log(`   ✅ ${op.type} (${op.id})`)

@@ -1,4 +1,5 @@
-import { ArrowUpRight } from 'lucide-react'
+// src/components/dashboard/StatCard.jsx
+import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 import Card from '../common/Card'
 
 export default function StatCard({
@@ -6,11 +7,13 @@ export default function StatCard({
   title,
   value,
   delta,
+  deltaPositive,
   compareLabel,
   attention,
 }) {
   const hasValue = value !== null && value !== undefined
   const hasDelta = delta !== null && delta !== undefined
+  const isPositive = deltaPositive !== false
 
   return (
     <Card className="hover:shadow-cardHover transition-shadow">
@@ -28,8 +31,18 @@ export default function StatCard({
 
       <div className="mt-2 flex items-center gap-2 text-xs">
         {hasDelta && (
-          <span className="inline-flex items-center gap-0.5 font-medium text-brand-blue">
-            <ArrowUpRight size={13} strokeWidth={2.4} />
+          <span
+            className={`inline-flex items-center gap-0.5 font-medium ${
+              isPositive
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-brand-red'
+            }`}
+          >
+            {isPositive ? (
+              <ArrowUpRight size={13} strokeWidth={2.4} />
+            ) : (
+              <ArrowDownRight size={13} strokeWidth={2.4} />
+            )}
             {delta}
           </span>
         )}

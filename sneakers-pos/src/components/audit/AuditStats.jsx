@@ -1,37 +1,78 @@
-import { History, ShieldCheck, AlertTriangle, Users } from 'lucide-react'
-import Card from '../common/Card'
+// src/components/audit/AuditStats.jsx
+import { useMemo } from 'react'
 
-export default function AuditStats({ stats }) {
-  const items = [
-    { key: 'total',    label: 'Eventos registrados',     value: stats?.total ?? 0,      helper: 'En el periodo',                icon: History,        tone: 'info' },
-    { key: 'admin',    label: 'Acciones administrativas',value: stats?.admin ?? 0,      helper: 'Cambios de configuración',     icon: ShieldCheck,    tone: 'info' },
-    { key: 'critical', label: 'Eventos críticos',        value: stats?.critical ?? 0,   helper: 'Requieren atención',           icon: AlertTriangle,  tone: stats?.critical > 0 ? 'warning' : 'info' },
-    { key: 'users',    label: 'Usuarios activos',        value: stats?.activeUsers ?? 0,helper: 'Con actividad registrada',     icon: Users,          tone: 'info' },
-  ]
+export default function AuditStats({ events }) {
+  const stats = useMemo(() => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
 
-  const tones = {
-    info:    'bg-blue-50 dark:bg-blue-950/40 text-brand-blue',
-    warning: 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400',
-  }
+    let todayCount = 0
+    let criticalCount = 0
+    let importantCount = 0
+    const byModule = {}
+
+    events.forEach((ev) => {
+      const d = new Date(ev.createdAt)
+      if (d >= today) todayCount++
+      if (ev.level === 'critical') criticalCount++
+      if (ev.level === 'important') importantCount++
+      const m = ev.module || 'system'
+      byModule[m] = (byModule[m] || 0) + 1
+    })
+
+    const topModules = Object.entries(byModule)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+
+    return { todayCount, criticalCount, importantCount, topModules }
+  }, [events])
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-      {items.map(({ key, label, value, helper, icon: Icon, tone }) => (
-        <Card key={key} className="!p-4">
-          <div className="flex items-start gap-3">
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${tones[tone]}`}>
-              <Icon size={17} strokeWidth={1.9} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs text-gray-500 dark:text-dark-muted truncate">{label}</p>
-              <p className="text-xl font-bold text-brand-black dark:text-dark-text leading-tight mt-0.5">
-                {value}
-              </p>
-              <p className="text-[11px] text-gray-400 dark:text-dark-muted mt-0.5 truncate">{helper}</p>
-            </div>
-          </div>
-        </Card>
-      ))}
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <StatCard
+        icon="📅"
+        label="Hoy"
+        value={stats.todayCount}
+        color="blue"
+      />
+      <StatCard
+        icon="⚠️"
+        label="Importantes"
+        value={stats.importantCount}
+        color="amber"
+      />
+      <StatCard
+        icon="🚨"
+        label="Críticos"
+        value={stats.criticalCount}
+        color="red"
+      />
+      <StatCard
+        icon="📦"
+        label="Total"
+        value={events.length}
+        color="gray"
+      />
+    </div>
+  )
+}
+
+function StatCard({ icon, label, value, color }) {
+  const colors = {
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+    red: 'bg-red-50 border-red-200 text-red-700',
+    gray: 'bg-gray-50 border-gray-200 text-gray-700',
+  }
+  return (
+    <div className={`rounded-xl border p-4 ${colors[color]}`}>
+      <div className="flex items-center gap-2 mb-1">
+        <span>{icon}</span>
+        <span className="text-xs font-semibold uppercase tracking-wide">
+          {label}
+        </span>
+      </div>
+      <div className="text-2xl font-bold">{value}</div>
     </div>
   )
 }

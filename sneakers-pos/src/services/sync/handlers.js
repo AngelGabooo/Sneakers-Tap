@@ -180,7 +180,7 @@ export const handlers = {
   // ---------------------------------------------------------------
   // VENTAS
   // ---------------------------------------------------------------
-  [OP.CREATE_SALE]: async (payload) => {
+    [OP.CREATE_SALE]: async (payload) => {
     const { sale, items } = payload
 
     const salePayload = {
@@ -220,16 +220,19 @@ export const handlers = {
       await mapLocalIdToServerId(sale.id, saleData.id)
     }
 
+    // Insertar items y descontar stock
     if (items?.length) {
-      const itemsToInsert = items.map((it) => ({
+    const itemsToInsert = items.map((it) => ({
         sale_id: saleData.id,
         product_id: it.productId || null,
         product_name: it.productName || null,
         variant_id: it.variantId || null,
         variant_label: it.variantLabel || null,
         sku: it.sku || null,
+        image_url: it.imageUrl || null,   // ⭐ NUEVO
         price: Number(it.price) || 0,
         base_price: Number(it.basePrice) || 0,
+        cost_price: Number(it.costPrice) || 0,   // ⭐ NUEVO (si ya lo agregaste antes)
         quantity: Number(it.quantity) || 1,
       }))
 
@@ -239,6 +242,57 @@ export const handlers = {
 
       if (itemsError) {
         console.warn('⚠️ Venta creada pero items fallaron:', itemsError)
+      }
+
+      // ⭐ DESCONTAR STOCK EN SUPABASE
+      for (const it of items) {
+        if (!it.variantId) continue
+
+        try {
+          // 1. Obtener stock actual
+          const { data: variantData, error: variantErr } = await supabase
+            .from('product_variants')
+            .select('id, stock, product_id')
+            .eq('id', it.variantId)
+            .single()
+
+          if (variantErr || !variantData) {
+            console.warn(`⚠️ Variante no encontrada: ${it.variantId}`)
+            continue
+          }
+
+          const previousStock = Number(variantData.stock) || 0
+          const newStock = Math.max(0, previousStock - (Number(it.quantity) || 1))
+
+          // 2. Actualizar stock
+          const { error: updateErr } = await supabase
+            .from('product_variants')
+            .update({ stock: newStock })
+            .eq('id', it.variantId)
+
+          if (updateErr) {
+            console.warn(`⚠️ Error actualizando stock de ${it.variantId}:`, updateErr)
+            continue
+          }
+
+          console.log(`📦 Stock remoto actualizado: ${it.sku} ${previousStock} → ${newStock}`)
+
+          // 3. Registrar movimiento
+          await supabase.from('inventory_movements').insert({
+            product_id: it.productId || variantData.product_id,
+            variant_id: it.variantId,
+            type: 'sale',
+            quantity: -Number(it.quantity),
+            previous_stock: previousStock,
+            new_stock: newStock,
+            reason: `Venta ${sale.folio}`,
+            sale_id: saleData.id,
+            created_by: sale.sellerId || null,
+            created_at: sale.createdAt || new Date().toISOString(),
+          })
+        } catch (err) {
+          console.error(`❌ Error descontando stock de ${it.sku}:`, err)
+        }
       }
     }
 
@@ -465,45 +519,53 @@ export const handlers = {
     return { ok: true }
   },
 
-    // ---------------------------------------------------------------
-  // AUDITORÍA
-  // ---------------------------------------------------------------
-  [OP.CREATE_AUDIT_LOG]: async (payload) => {
-    const { event } = payload
+// ---------------------------------------------------------------
+// AUDITORÍA
+// ---------------------------------------------------------------
+[OP.CREATE_AUDIT_LOG]: async (payload) => {
+  const { event } = payload
 
-    const auditPayload = {
-      user_id: event.userId || null,
-      user_name: event.userName || null,
-      user_role: event.userRole || null,
-      action: event.action,
-      entity: event.entity || null,
-      entity_id: event.entityId || null,
-      description: event.description || null,
-      metadata: event.metadata || {},
-      ip: event.ip || null,
-      device: event.device || null,
-      created_at: event.createdAt || new Date().toISOString(),
-    }
+  // ⭐ Empaquetar TODO lo extra dentro de metadata
+  const enrichedMetadata = {
+    ...(event.metadata || {}),
+    module: event.module || 'system',
+    entityName: event.entityName || event.entityId || null,
+    level: event.level || 'info',
+    result: event.result || 'success',
+    branch: event.branch || 'Tienda principal',
+    reason: event.reason || null,
+    origin: event.origin || null,
+  }
 
-    if (event.id && !event.id.startsWith('local_')) {
-      auditPayload.id = event.id
-    }
+  const auditPayload = {
+    user_id: event.userId || null,
+    user_name: event.userName || null,
+    user_role: event.userRole || null,
+    action: event.action,
+    entity: event.entity || null,
+    entity_id: event.entityId || null,
+    description: event.description || null,
+    metadata: enrichedMetadata,
+    ip: event.ip || null,
+    device: event.device || null,
+    created_at: event.createdAt || new Date().toISOString(),
+  }
 
-    const { data, error } = await supabase
-      .from('audit_log')
-      .insert(auditPayload)
-      .select()
-      .single()
+  // ✅ NO forzamos el ID: dejamos que Supabase genere su UUID.
+  //    Como la auditoría es un log histórico, no necesita remapeo.
 
-    if (error) return { ok: false, error: error.message }
+  const { data, error } = await supabase
+    .from('audit_log')
+    .insert(auditPayload)
+    .select()
+    .single()
 
-    if (event.id?.startsWith('local_')) {
-      await mapLocalIdToServerId(event.id, data.id)
-    }
+  if (error) return { ok: false, error: error.message }
 
-    return { ok: true, serverId: data.id }
-  },
-  
+  // Guardamos el serverId en el payload para que el syncEngine
+  // pueda actualizar el registro local (ver BLOQUE A2)
+  return { ok: true, serverId: data.id }
+},
 
   // ---------------------------------------------------------------
   // CONFIGURACIÓN (SETTINGS)

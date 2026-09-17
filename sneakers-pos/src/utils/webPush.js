@@ -150,3 +150,43 @@ export async function getPushStatus() {
   const sub = await getExistingSubscription()
   return sub ? 'subscribed' : 'granted'
 }
+
+/**
+ * Escucha los mensajes del SW cuando renueva la suscripción.
+ * El SW manda `PUSH_SUBSCRIPTION_CHANGED` con la nueva suscripción,
+ * y aquí la guardamos en Supabase.
+ *
+ * Llama esto una vez al montar la app (ver main.jsx o AuthContext).
+ */
+export function listenForSubscriptionChanges(userId) {
+  if (typeof navigator === 'undefined') return () => {}
+  if (!('serviceWorker' in navigator)) return () => {}
+
+  const handler = async (event) => {
+    if (event.data?.type !== 'PUSH_SUBSCRIPTION_CHANGED') return
+
+    const sub = event.data.subscription
+    console.log('🔄 SW renovó la suscripción, guardando en Supabase…')
+
+    const { error } = await supabase.from('push_subscriptions').upsert(
+      {
+        user_id: userId,
+        endpoint: sub.endpoint,
+        p256dh: sub.keys.p256dh,
+        auth: sub.keys.auth,
+        user_agent: navigator.userAgent,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'endpoint' },
+    )
+
+    if (error) {
+      console.error('❌ Error guardando suscripción renovada:', error)
+    } else {
+      console.log('✅ Suscripción renovada guardada en Supabase')
+    }
+  }
+
+  navigator.serviceWorker.addEventListener('message', handler)
+  return () => navigator.serviceWorker.removeEventListener('message', handler)
+}

@@ -44,6 +44,11 @@ self.addEventListener('push', (event) => {
     requireInteraction: data.priority === 'critical',
     vibrate: data.priority === 'critical' ? [200, 100, 200] : [100],
     silent: false,
+    // ⭐ Acciones rápidas (soportadas en Android/Desktop; iOS las ignora)
+    actions: [
+      { action: 'open', title: 'Ver' },
+      { action: 'close', title: 'Cerrar' },
+    ],
   }
 
   event.waitUntil(
@@ -55,11 +60,12 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
+  if (event.action === 'close') return
+
   const url = event.notification.data?.url || '/'
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      // Si ya hay una ventana abierta, enfocarla
       for (const client of clients) {
         if (client.url.includes(self.location.origin)) {
           client.focus()
@@ -67,8 +73,42 @@ self.addEventListener('notificationclick', (event) => {
           return
         }
       }
-      // Si no, abrir una nueva
       return self.clients.openWindow(url)
     }),
+  )
+})
+
+// ⭐ NUEVO: cuando el navegador invalida la suscripción
+//    (pasa en Chrome/Android periódicamente y en iOS al reinstalar la PWA)
+self.addEventListener('pushsubscriptionchange', (event) => {
+  console.log('🔄 Push subscription cambió, renovando…')
+
+  event.waitUntil(
+    (async () => {
+      try {
+        // Re-suscribirse con la misma VAPID key que tenía antes
+        const newSub = await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: event.oldSubscription?.options?.applicationServerKey,
+        })
+
+        // Avisar a todas las pestañas abiertas para que actualicen Supabase
+        const clients = await self.clients.matchAll({
+          type: 'window',
+          includeUncontrolled: true,
+        })
+
+        for (const client of clients) {
+          client.postMessage({
+            type: 'PUSH_SUBSCRIPTION_CHANGED',
+            subscription: newSub.toJSON(),
+          })
+        }
+
+        console.log('✅ Suscripción renovada y clientes notificados')
+      } catch (err) {
+        console.error('❌ Error renovando suscripción:', err)
+      }
+    })(),
   )
 })

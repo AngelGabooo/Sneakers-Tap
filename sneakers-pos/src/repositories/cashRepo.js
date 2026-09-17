@@ -4,51 +4,32 @@ import { cashService } from '../services/cashService'
 import { syncQueue } from '../services/sync/syncQueue'
 import { OP, PRIORITY } from '../services/sync/operationTypes'
 import { generateLocalId } from '../lib/idGenerator'
-
-/**
- * Repositorio offline-first de caja (sesiones + movimientos).
- */
+import { logAudit } from '../utils/auditHelpers'
 
 // =====================================================================
-// HELPERS INTERNOS
+// HELPERS
 // =====================================================================
 
 async function saveSessionToLocal(session) {
   const db = await dbPromise
-
-  // Guardar sesión
   await db.put(STORES.CASH_SESSIONS, session)
 
-  // Guardar movimientos por separado
   if (Array.isArray(session.movements)) {
-    const existing = await db.getAllFromIndex(
-      STORES.CASH_MOVEMENTS,
-      'session_id',
-      session.id,
-    )
+    const existing = await db.getAllFromIndex(STORES.CASH_MOVEMENTS, 'session_id', session.id)
     for (const m of existing) {
       await db.delete(STORES.CASH_MOVEMENTS, m.id)
     }
-
     for (const movement of session.movements) {
-      await db.put(STORES.CASH_MOVEMENTS, {
-        ...movement,
-        session_id: session.id,
-      })
+      await db.put(STORES.CASH_MOVEMENTS, { ...movement, session_id: session.id })
     }
   }
-
   return session
 }
 
 async function hydrateSession(session) {
   if (!session) return null
   const db = await dbPromise
-  const movements = await db.getAllFromIndex(
-    STORES.CASH_MOVEMENTS,
-    'session_id',
-    session.id,
-  )
+  const movements = await db.getAllFromIndex(STORES.CASH_MOVEMENTS, 'session_id', session.id)
   return { ...session, movements }
 }
 
@@ -102,9 +83,7 @@ export const cashRepo = {
     const db = await dbPromise
     const sessions = await db.getAll(STORES.CASH_SESSIONS)
     const hydrated = await Promise.all(sessions.map(hydrateSession))
-    return hydrated
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt))
+    return hydrated.filter(Boolean).sort((a, b) => new Date(b.openedAt) - new Date(a.openedAt))
   },
 
   async getByIdLocal(id) {
@@ -118,11 +97,9 @@ export const cashRepo = {
       console.log('🔄 Sincronizando cajas desde Supabase...')
       const remote = await cashService.getAll()
       const mapped = remote.map(mapFromSupabase)
-
       for (const session of mapped) {
         await saveSessionToLocal(session)
       }
-
       console.log(`✅ ${mapped.length} cajas sincronizadas`)
       return mapped
     } catch (err) {
@@ -131,15 +108,9 @@ export const cashRepo = {
     }
   },
 
-  /**
-   * Abre una caja localmente + encola sync.
-   */
   async open(payload) {
     const isOnline = navigator.onLine
-    const id = isOnline && crypto?.randomUUID
-      ? crypto.randomUUID()
-      : generateLocalId('cash')
-
+    const id = isOnline && crypto?.randomUUID ? crypto.randomUUID() : generateLocalId('cash')
     const now = new Date().toISOString()
 
     const localSession = {
@@ -185,6 +156,25 @@ export const cashRepo = {
 
     await saveSessionToLocal(localSession)
 
+    // ⭐ Auditoría: Abrir caja
+    await logAudit({
+      action: 'register',
+      module: 'cash',
+      entity: 'cash',
+      entityId: localSession.id,
+      entityName: localSession.cashLabel,
+      description: `Apertura de caja ${localSession.cashLabel} con fondo de $${Number(localSession.initialFund || 0).toLocaleString('es-MX')}`,
+      userId: payload.responsibleId,
+      userName: payload.responsibleName,
+      userRole: payload.responsibleRole,
+      branch: payload.branch,
+      level: 'info',
+      metadata: {
+        initialFund: localSession.initialFund,
+        breakdown: localSession.breakdown,
+      },
+    })
+
     await syncQueue.add({
       type: OP.OPEN_CASH,
       entity: 'cash_sessions',
@@ -199,9 +189,6 @@ export const cashRepo = {
     return localSession
   },
 
-  /**
-   * Cierra una caja localmente + encola sync.
-   */
   async close(id, patch) {
     const existing = await this.getByIdLocal(id)
     if (!existing) throw new Error(`Sesión no encontrada: ${id}`)
@@ -223,6 +210,29 @@ export const cashRepo = {
     }
 
     await saveSessionToLocal(updated)
+
+    // ⭐ Auditoría: Cerrar caja
+    const hasDiff = Math.abs(Number(patch.difference) || 0) > 0.01
+    await logAudit({
+      action: 'close',
+      module: 'cash',
+      entity: 'cash',
+      entityId: updated.id,
+      entityName: updated.cashLabel,
+      description: hasDiff
+        ? `Cierre de caja ${updated.cashLabel} · Diferencia $${Number(patch.difference).toLocaleString('es-MX')}`
+        : `Cierre de caja ${updated.cashLabel} sin diferencias`,
+      userName: patch.closedBy,
+      userRole: 'Cajero',
+      branch: updated.branch,
+      level: hasDiff ? 'critical' : 'info',
+      reason: patch.reason || null,
+      metadata: {
+        closingFund: patch.closingFund,
+        expectedCash: patch.expectedCash,
+        difference: patch.difference,
+      },
+    })
 
     await syncQueue.add({
       type: OP.CLOSE_CASH,
@@ -247,9 +257,6 @@ export const cashRepo = {
     return updated
   },
 
-  /**
-   * Agrega un movimiento a una sesión.
-   */
   async addMovement({ sessionId, type, label, amount, notes, createdBy }) {
     const db = await dbPromise
     const session = await db.get(STORES.CASH_SESSIONS, sessionId)
@@ -269,6 +276,20 @@ export const cashRepo = {
 
     await db.put(STORES.CASH_MOVEMENTS, movement)
 
+    // ⭐ Auditoría: Movimiento de caja
+    await logAudit({
+      action: 'register',
+      module: 'cash',
+      entity: 'cash_movement',
+      entityId: movement.id,
+      entityName: label,
+      description: `${type === 'in' ? 'Entrada' : 'Retiro'} de $${Number(amount).toLocaleString('es-MX')} en caja`,
+      userName: createdBy,
+      branch: session.branch,
+      level: type === 'out' ? 'important' : 'info',
+      metadata: { amount, type, sessionId },
+    })
+
     await syncQueue.add({
       type: OP.ADD_CASH_MOVE,
       entity: 'cash_movements',
@@ -282,13 +303,10 @@ export const cashRepo = {
   async delete(id) {
     const db = await dbPromise
     await db.delete(STORES.CASH_SESSIONS, id)
-
     const movements = await db.getAllFromIndex(STORES.CASH_MOVEMENTS, 'session_id', id)
     for (const m of movements) {
       await db.delete(STORES.CASH_MOVEMENTS, m.id)
     }
-
-    console.log(`🗑️  Sesión de caja eliminada: ${id}`)
     return true
   },
 }

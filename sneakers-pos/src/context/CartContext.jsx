@@ -12,6 +12,30 @@ const EMPTY_CART = {
   note: '',
 }
 
+/**
+ * Extrae la URL de la imagen de un producto de forma robusta.
+ * Soporta:
+ *   - Array de strings: ['url1', 'url2']
+ *   - Array de objetos: [{ url: '...', isPrimary: true }]
+ *   - String directa
+ *   - null / undefined
+ */
+function extractImageUrl(images) {
+  if (!images) return null
+  if (typeof images === 'string') return images
+  if (!Array.isArray(images) || images.length === 0) return null
+
+  // Preferir la marcada como primary
+  const primary = images.find((img) => img?.isPrimary)
+  const first = primary || images[0]
+
+  if (typeof first === 'string') return first
+  if (first && typeof first === 'object') {
+    return first.url || first.publicUrl || null
+  }
+  return null
+}
+
 export function CartProvider({ children }) {
   const { user } = useAuth()
   const userId = user?.id || null
@@ -21,13 +45,9 @@ export function CartProvider({ children }) {
   const [manualDiscount, setManualDiscount] = useState(null)
   const [note, setNote] = useState('')
 
-  // -------------------------------------------------------------
   // Cargar carrito al cambiar de usuario
-  // Cada usuario tiene su propia clave en sessionStorage
-  // -------------------------------------------------------------
   useEffect(() => {
     if (!userId) {
-      // Sin usuario → carrito vacío
       setItems([])
       setCustomer(null)
       setManualDiscount(null)
@@ -50,19 +70,13 @@ export function CartProvider({ children }) {
     }
   }, [userId])
 
-  // -------------------------------------------------------------
-  // Persistir el carrito automáticamente
-  // (solo si hay usuario)
-  // -------------------------------------------------------------
+  // Persistir
   useEffect(() => {
     if (!userId) return
     const key = storageKey('cart', userId)
     writeSessionJSON(key, { items, customer, manualDiscount, note })
   }, [userId, items, customer, manualDiscount, note])
 
-  /**
-   * Factor multiplicador del precio según el cliente mayorista.
-   */
   const priceFactor = useMemo(() => {
     if (!customer?.isWholesale) return 1
     const d = Number(customer.defaultDiscount) || 0
@@ -77,6 +91,15 @@ export function CartProvider({ children }) {
       const variantLabel = variant?.label || '—'
       const sku = variant?.sku || product.sku || ''
       const stock = variant ? Number(variant.stock) || 0 : Number(product.initialStock) || 0
+
+      // ⭐ Extraer imagen de forma robusta
+      const imageUrl = extractImageUrl(product.images)
+
+      console.log('🖼️ addItem imagen:', {
+        productName: product.name,
+        images: product.images,
+        imageUrl,
+      })
 
       setItems((list) => {
         const existing = list.find((i) => i.key === key)
@@ -95,7 +118,7 @@ export function CartProvider({ children }) {
             variantId: variant?.id || null,
             variantLabel,
             sku,
-            imageUrl: product.images?.[0]?.url || null,
+            imageUrl,
             basePrice,
             price,
             quantity: Math.min(stock, quantity),
@@ -107,7 +130,7 @@ export function CartProvider({ children }) {
     [priceFactor],
   )
 
-  // Recalcular precios cuando cambia el cliente (mayorista ↔ regular)
+  // Recalcular precios cuando cambia el cliente
   useEffect(() => {
     setItems((list) =>
       list.map((i) => ({ ...i, price: (i.basePrice || 0) * priceFactor })),
@@ -139,7 +162,6 @@ export function CartProvider({ children }) {
     }
   }, [userId])
 
-  // Totales
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, i) => acc + (i.basePrice || 0) * i.quantity, 0)
     const discounted = items.reduce((acc, i) => acc + i.price * i.quantity, 0)

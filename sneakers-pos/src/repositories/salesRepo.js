@@ -4,59 +4,33 @@ import { salesService } from '../services/salesService'
 import { syncQueue } from '../services/sync/syncQueue'
 import { OP, PRIORITY } from '../services/sync/operationTypes'
 import { generateLocalId } from '../lib/idGenerator'
-
-/**
- * Repositorio offline-first de ventas.
- *
- * Estrategia:
- *   - LECTURA: IndexedDB primero (rápido), Supabase en background
- *   - ESCRITURA: IndexedDB + cola de sync (funciona sin internet)
- *   - Las ventas se guardan en STORES.SALES
- *   - Los items se guardan en STORES.SALE_ITEMS
- */
+import { notifyVariantStockChanged } from '../utils/events'
+import { logAudit } from '../utils/auditHelpers'
 
 // =====================================================================
-// HELPERS INTERNOS
+// HELPERS
 // =====================================================================
 
 async function saveSaleToLocal(sale) {
   const db = await dbPromise
-
-  // Guardar venta
   await db.put(STORES.SALES, sale)
 
-  // Guardar items por separado
   if (Array.isArray(sale.items)) {
-    // Borrar items viejos de esta venta
-    const existingItems = await db.getAllFromIndex(
-      STORES.SALE_ITEMS,
-      'sale_id',
-      sale.id,
-    )
+    const existingItems = await db.getAllFromIndex(STORES.SALE_ITEMS, 'sale_id', sale.id)
     for (const item of existingItems) {
       await db.delete(STORES.SALE_ITEMS, item.id)
     }
-
-    // Guardar los nuevos
     for (const item of sale.items) {
-      await db.put(STORES.SALE_ITEMS, {
-        ...item,
-        sale_id: sale.id,
-      })
+      await db.put(STORES.SALE_ITEMS, { ...item, sale_id: sale.id })
     }
   }
-
   return sale
 }
 
 async function hydrateSale(sale) {
   if (!sale) return null
   const db = await dbPromise
-  const items = await db.getAllFromIndex(
-    STORES.SALE_ITEMS,
-    'sale_id',
-    sale.id,
-  )
+  const items = await db.getAllFromIndex(STORES.SALE_ITEMS, 'sale_id', sale.id)
   return { ...sale, items }
 }
 
@@ -96,8 +70,10 @@ function mapFromSupabase(row) {
       variantId: it.variant_id,
       variantLabel: it.variant_label,
       sku: it.sku,
+      imageUrl: it.image_url || null,
       price: Number(it.price) || 0,
       basePrice: Number(it.base_price) || 0,
+      costPrice: Number(it.cost_price) || 0,
       quantity: Number(it.quantity) || 1,
     })),
   }
@@ -125,6 +101,58 @@ function mapToSupabase(sale) {
   }
 }
 
+async function decrementLocalStock(items, saleId, saleFolio, createdBy) {
+  const db = await dbPromise
+  const now = new Date().toISOString()
+
+  for (const item of items) {
+    if (!item.variantId) continue
+    try {
+      const dbVariant = await db.get(STORES.PRODUCT_VARIANTS, item.variantId)
+      if (!dbVariant) continue
+
+      const previousStock = Number(dbVariant.stock) || 0
+      const newStock = Math.max(0, previousStock - (Number(item.quantity) || 1))
+
+      await db.put(STORES.PRODUCT_VARIANTS, { ...dbVariant, stock: newStock })
+
+      const movementId = generateLocalId('mov')
+      await db.put(STORES.INVENTORY_MOVES, {
+        id: movementId,
+        productId: item.productId,
+        productName: item.productName,
+        variantId: item.variantId,
+        variantLabel: item.variantLabel,
+        sku: item.sku,
+        type: 'sale',
+        quantity: -Number(item.quantity),
+        previousStock,
+        newStock,
+        reason: `Venta ${saleFolio}`,
+        saleId,
+        createdBy: createdBy || null,
+        createdAt: now,
+        syncStatus: 'pending',
+      })
+
+      console.log(`📦 Stock local actualizado: ${item.sku || item.variantId} ${previousStock} → ${newStock}`)
+    } catch (err) {
+      console.error(`❌ Error descontando stock de ${item.sku}:`, err)
+    }
+  }
+}
+
+async function generateUniqueFolio() {
+  const db = await dbPromise
+  const all = await db.getAll(STORES.SALES)
+  const prefix = 'VTA-'
+  const nums = all
+    .map((s) => Number((s.folio || '').replace(prefix, '')))
+    .filter((n) => !isNaN(n))
+  const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
+  return `${prefix}${String(next).padStart(6, '0')}`
+}
+
 // =====================================================================
 // API PÚBLICA
 // =====================================================================
@@ -134,17 +162,13 @@ export const salesRepo = {
     const db = await dbPromise
     const sales = await db.getAll(STORES.SALES)
     const hydrated = await Promise.all(sales.map(hydrateSale))
-    return hydrated
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    return hydrated.filter(Boolean).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
   },
 
   async getByIdLocal(id) {
     const db = await dbPromise
     const sale = await db.get(STORES.SALES, id)
     if (sale) return hydrateSale(sale)
-
-    // Fallback: buscar por folio
     const all = await db.getAll(STORES.SALES)
     const found = all.find((s) => s.folio === id)
     return found ? hydrateSale(found) : null
@@ -155,11 +179,9 @@ export const salesRepo = {
       console.log('🔄 Sincronizando ventas desde Supabase...')
       const remote = await salesService.getAll()
       const mapped = remote.map(mapFromSupabase)
-
       for (const sale of mapped) {
         await saveSaleToLocal(sale)
       }
-
       console.log(`✅ ${mapped.length} ventas sincronizadas`)
       return mapped
     } catch (err) {
@@ -168,19 +190,11 @@ export const salesRepo = {
     }
   },
 
-  /**
-   * Crea una venta localmente + encola para sync.
-   */
   async create(payload) {
     const isOnline = navigator.onLine
-    const id = isOnline && crypto?.randomUUID
-      ? crypto.randomUUID()
-      : generateLocalId('sale')
-
+    const id = isOnline && crypto?.randomUUID ? crypto.randomUUID() : generateLocalId('sale')
     const now = new Date().toISOString()
-
-    // Folio local si no viene
-    const folio = payload.folio || `VTA-${String(Date.now()).slice(-6)}`
+    const folio = payload.folio || (await generateUniqueFolio())
 
     const localSale = {
       id,
@@ -212,16 +226,39 @@ export const salesRepo = {
         variantId: it.variantId,
         variantLabel: it.variantLabel,
         sku: it.sku,
+        imageUrl: it.imageUrl || null,
         price: Number(it.price) || 0,
         basePrice: Number(it.basePrice) || 0,
+        costPrice: Number(it.costPrice) || 0,
         quantity: Number(it.quantity) || 1,
       })),
     }
 
-    // 1. Guardar en IndexedDB
     await saveSaleToLocal(localSale)
+    await decrementLocalStock(localSale.items, localSale.id, localSale.folio, payload.sellerId)
+    notifyVariantStockChanged()
 
-    // 2. Encolar para sync
+    // ⭐ Auditoría: Crear venta
+    await logAudit({
+      action: 'create',
+      module: 'sales',
+      entity: 'sale',
+      entityId: localSale.folio,
+      entityName: localSale.folio,
+      description: `Venta ${localSale.folio} por $${Number(localSale.total || 0).toLocaleString('es-MX')}`,
+      userId: payload.sellerId,
+      userName: payload.cashier,
+      userRole: payload.cashierRole,
+      branch: payload.branch,
+      level: Number(localSale.total) > 5000 ? 'important' : 'info',
+      metadata: {
+        total: localSale.total,
+        itemsCount: localSale.items.length,
+        customerName: localSale.customerName,
+        paymentMethod: localSale.payment?.method,
+      },
+    })
+
     await syncQueue.add({
       type: OP.CREATE_SALE,
       entity: 'sales',
@@ -253,10 +290,7 @@ export const salesRepo = {
     await syncQueue.add({
       type: OP.UPDATE_SALE,
       entity: 'sales',
-      payload: {
-        id,
-        patch: mapToSupabase(updated),
-      },
+      payload: { id, patch: mapToSupabase(updated) },
       priority: PRIORITY.NORMAL,
     })
 
@@ -281,15 +315,30 @@ export const salesRepo = {
 
     await saveSaleToLocal(updated)
 
+    // ⭐ Auditoría: Cancelar venta
+    await logAudit({
+      action: 'cancel',
+      module: 'sales',
+      entity: 'sale',
+      entityId: updated.folio,
+      entityName: updated.folio,
+      description: `Venta ${updated.folio} cancelada`,
+      userName: cancelledBy,
+      userRole: 'Vendedor',
+      branch: updated.branch,
+      level: 'critical',
+      reason: reason || 'Sin motivo',
+      metadata: {
+        total: updated.total,
+        reason,
+        notes,
+      },
+    })
+
     await syncQueue.add({
       type: OP.CANCEL_SALE,
       entity: 'sales',
-      payload: {
-        id,
-        reason: reason || null,
-        notes: notes || null,
-        cancelledBy: cancelledBy || null,
-      },
+      payload: { id, reason, notes, cancelledBy },
       priority: PRIORITY.HIGH,
     })
 
@@ -300,27 +349,14 @@ export const salesRepo = {
   async delete(id) {
     const db = await dbPromise
     await db.delete(STORES.SALES, id)
-
     const items = await db.getAllFromIndex(STORES.SALE_ITEMS, 'sale_id', id)
     for (const item of items) {
       await db.delete(STORES.SALE_ITEMS, item.id)
     }
-
-    console.log(`🗑️  Venta eliminada: ${id}`)
     return true
   },
 
-  /**
-   * Obtiene el folio local más alto (para generar el siguiente sin depender de Supabase).
-   */
   async nextLocalFolio() {
-    const db = await dbPromise
-    const all = await db.getAll(STORES.SALES)
-    const prefix = 'VTA-'
-    const nums = all
-      .map((s) => Number((s.folio || '').replace(prefix, '')))
-      .filter((n) => !isNaN(n))
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1
-    return `${prefix}${String(next).padStart(6, '0')}`
+    return await generateUniqueFolio()
   },
 }

@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { authService } from '../services/authService'
 import { profilesService } from '../services/profilesService'
+import { getPushStatus, subscribeToPush } from '../utils/webPush'
 
 const AuthContext = createContext(null)
 
@@ -162,6 +163,34 @@ export function AuthProvider({ children }) {
       subscription?.unsubscribe()
     }
   }, [loadProfile])
+
+  // ⭐ NUEVO: auto-sanación de suscripción push
+  // Si el usuario ya dio permiso pero la suscripción se perdió
+  // (pasa en Android/Chrome y al reinstalar la PWA en iOS), la renovamos.
+  useEffect(() => {
+    if (!user?.id) return
+    if (typeof window === 'undefined') return
+    if (!('Notification' in window)) return
+    if (!('serviceWorker' in navigator)) return
+
+    let alive = true
+    ;(async () => {
+      try {
+        const status = await getPushStatus()
+        if (!alive) return
+
+        // Caso típico: permiso concedido, pero sin suscripción activa
+        if (status === 'granted') {
+          console.log('🔄 Push sin suscripción activa, renovando…')
+          await subscribeToPush(user.id)
+        }
+      } catch (err) {
+        console.warn('⚠️ Error auto-sanando push:', err.message)
+      }
+    })()
+
+    return () => { alive = false }
+  }, [user?.id])
 
   return (
     <AuthContext.Provider
