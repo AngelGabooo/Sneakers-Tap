@@ -1,7 +1,7 @@
+// src/components/products/detail/VariantsStockActionsModal.jsx
 import { useState } from 'react'
 import { X, Plus } from 'lucide-react'
 import Button from '../../common/Button'
-import Checkbox from '../../common/Checkbox'
 
 export default function VariantsStockActionsModal({
   open,
@@ -11,6 +11,7 @@ export default function VariantsStockActionsModal({
 }) {
   const [mode, setMode] = useState('add') // 'add' | 'set'
   const [quantities, setQuantities] = useState({}) // { [variantId]: number }
+  const [applyToAll, setApplyToAll] = useState('') // ⭐ nuevo estado controlado
 
   if (!open) return null
 
@@ -19,6 +20,8 @@ export default function VariantsStockActionsModal({
   }
 
   const handleApplyToAll = (value) => {
+    // Solo aplica si el valor es un número válido
+    if (value === '' || value == null) return
     const v = value
     const next = {}
     variants.forEach((variant) => { next[variant.id] = v })
@@ -35,6 +38,13 @@ export default function VariantsStockActionsModal({
       }))
     onConfirm?.(updates)
     setQuantities({})
+    setApplyToAll('')
+    onClose?.()
+  }
+
+  const handleClose = () => {
+    setQuantities({})
+    setApplyToAll('')
     onClose?.()
   }
 
@@ -50,7 +60,7 @@ export default function VariantsStockActionsModal({
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-gray-400 hover:text-brand-black dark:hover:text-dark-text transition-colors"
             aria-label="Cerrar"
           >
@@ -80,8 +90,12 @@ export default function VariantsStockActionsModal({
             <input
               type="number"
               min={1}
+              value={applyToAll}                               
+              onChange={(e) => {
+                setApplyToAll(e.target.value)
+                handleApplyToAll(e.target.value)
+              }}
               placeholder="Aplicar a todos"
-              onChange={(e) => handleApplyToAll(e.target.value)}
               className="w-32 h-8 px-2 rounded-md text-xs bg-white dark:bg-dark-card text-brand-black dark:text-dark-text border border-gray-200 dark:border-dark-border focus:border-brand-blue outline-none"
             />
           </div>
@@ -123,7 +137,7 @@ export default function VariantsStockActionsModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100 dark:border-dark-border shrink-0">
-          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+          <Button variant="secondary" onClick={handleClose}>Cancelar</Button>
           <Button variant="primary" onClick={handleConfirm} disabled={variants.length === 0}>
             Aplicar cambios
           </Button>

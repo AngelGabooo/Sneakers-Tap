@@ -1,3 +1,4 @@
+// src/pages/RoleEditor.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Save, X } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -99,28 +100,66 @@ export default function RoleEditor() {
     return Object.keys(e).length === 0
   }
 
-  const handleSubmit = () => {
+  // ⭐ handleSubmit ahora es async con await + try/catch
+  const handleSubmit = async () => {
     if (!validate()) return
     setSubmitting(true)
 
-    setTimeout(() => {
+    try {
+      // Payload limpio
+      const payload = {
+        name: form.name.trim(),
+        description: form.description.trim(),
+        status: form.status,
+        scope: form.scope,
+        branches: form.branches || [],
+        permissions: form.permissions || [],
+      }
+
+      console.log('📤 Guardando rol:', {
+        isEdit,
+        roleId,
+        name: payload.name,
+        numPermissions: payload.permissions.length,
+      })
+
       if (isEdit && roleId) {
-        updateRole(roleId, form)
+        // ✅ AWAIT
+        const updated = await updateRole(roleId, payload)
+        console.log(
+          '✅ Rol actualizado:',
+          updated?.name,
+          'con',
+          updated?.permissions?.length,
+          'permisos',
+        )
+
         setToast({
           title: 'Rol actualizado correctamente',
-          description: `Los cambios de "${form.name}" fueron guardados.`,
+          description: `"${payload.name}" guardado con ${payload.permissions.length} permisos.`,
         })
       } else {
-        createRole(form)
+        // ✅ AWAIT
+        const created = await createRole(payload)
+        console.log('✅ Rol creado:', created?.name)
+
         setToast({
           title: 'Rol creado correctamente',
-          description: `"${form.name}" fue agregado a la lista de roles.`,
+          description: `"${payload.name}" creado con ${payload.permissions.length} permisos.`,
         })
       }
+
       setSubmitting(false)
       setDirty(false)
-      setTimeout(() => navigate('roles'), 800)
-    }, 500)
+      setTimeout(() => navigate('roles'), 1000)
+    } catch (err) {
+      console.error('❌ Error guardando rol:', err)
+      setSubmitting(false)
+      setToast({
+        title: 'Error al guardar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   const handleCancel = () => {
@@ -313,7 +352,7 @@ export default function RoleEditor() {
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

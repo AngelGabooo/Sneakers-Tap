@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react'
+// src/components/pos/PosCustomerPicker.jsx
+import { useState, useMemo, useEffect } from 'react'
 import { Search, UserPlus, X, Building2, User, Percent } from 'lucide-react'
 import Button from '../common/Button'
 import Badge from '../common/Badge'
 import { useWholesale } from '../../context/WholesaleContext'
+import { useView } from '../../context/ViewContext'
 
 /**
  * Selector de cliente para el POS.
@@ -11,11 +13,17 @@ import { useWholesale } from '../../context/WholesaleContext'
  */
 export default function PosCustomerPicker({ open, onClose, onSelect, onClearCustomer }) {
   const { wholesales } = useWholesale()
+  const { navigate } = useView()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState('regular') // 'regular' | 'wholesale'
 
   // 🚧 TODO: reemplazar por clientes reales desde un `CustomersContext`
   const regularCustomers = []
+
+  // Resetear query al abrir
+  useEffect(() => {
+    if (open) setQuery('')
+  }, [open])
 
   // Filtrado local
   const filteredWholesales = useMemo(() => {
@@ -43,7 +51,6 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
   if (!open) return null
 
   const handleSelectWholesale = (w) => {
-    // Convertimos el mayorista al formato de "customer" que usa el carrito
     onSelect?.({
       id: w.id,
       name: w.name,
@@ -78,6 +85,22 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
     setQuery('')
     onClose?.()
   }
+
+  /**
+   * ⭐ Navega a crear un nuevo cliente según el tab activo.
+   */
+  const handleNewCustomer = () => {
+    onClose?.()
+    if (tab === 'wholesale') {
+      navigate('wholesale-new')
+    } else {
+      // TODO: navegar a crear cliente regular cuando exista la vista
+      navigate('customers-new')
+    }
+  }
+
+  const isWholesaleTab = tab === 'wholesale'
+  const newButtonLabel = isWholesaleTab ? 'Nuevo cliente mayorista' : 'Nuevo cliente'
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -124,7 +147,7 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
-                tab === 'wholesale'
+                isWholesaleTab
                   ? 'Buscar mayorista por nombre, empresa, contacto o ID...'
                   : 'Buscar por nombre, teléfono o correo...'
               }
@@ -155,11 +178,28 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
           </button>
 
           {/* Lista según tab */}
-          {tab === 'wholesale' ? (
+          {isWholesaleTab ? (
             filteredWholesales.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-dark-muted text-center py-6">
-                No hay mayoristas que coincidan con la búsqueda.
-              </p>
+              <div className="text-center py-8">
+                <p className="text-sm text-gray-500 dark:text-dark-muted">
+                  {wholesales.length === 0
+                    ? 'No hay clientes mayoristas registrados.'
+                    : 'No hay mayoristas que coincidan con la búsqueda.'}
+                </p>
+                {wholesales.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleNewCustomer}
+                    className="
+                      mt-3 inline-flex items-center gap-1.5 text-sm font-medium
+                      text-brand-blue hover:underline
+                    "
+                  >
+                    <UserPlus size={14} strokeWidth={2.2} />
+                    Crear el primer mayorista
+                  </button>
+                )}
+              </div>
             ) : (
               filteredWholesales.map((w) => (
                 <WholesaleItem
@@ -180,15 +220,15 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
           )}
         </div>
 
-        {/* Nuevo cliente */}
+        {/* Nuevo cliente — ⭐ AHORA FUNCIONA */}
         <div className="px-5 py-4 border-t border-gray-100 dark:border-dark-border shrink-0">
           <Button
-            variant="secondary"
+            variant="primary"
             icon={UserPlus}
             className="w-full"
-            onClick={() => console.log('Nuevo cliente rápido → pendiente')}
+            onClick={handleNewCustomer}
           >
-            Nuevo cliente
+            {newButtonLabel}
           </Button>
         </div>
       </div>
