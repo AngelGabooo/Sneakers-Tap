@@ -28,7 +28,27 @@ import { SettingsProvider } from './context/SettingsContext.jsx'
 
 import './index.css'
 
-// Registrar Service Worker (sin pedir permiso, solo instala)
+// ⭐ Escuchar click en notificación (app abierta)
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type !== 'NOTIFICATION_CLICK') return
+    console.log('🔔 Click en notificación:', event.data)
+    const view = event.data.view
+    if (view && window.__viewNavigate) {
+      window.__viewNavigate(view)
+    }
+  })
+}
+
+// ⭐ Leer vista pendiente desde URL (app se abrió por click en notif)
+const params = new URLSearchParams(window.location.search)
+const pendingView = params.get('view')
+if (pendingView) {
+  sessionStorage.setItem('pendingNotificationView', pendingView)
+  window.history.replaceState({}, '', window.location.pathname)
+}
+
+// Registrar Service Worker
 registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root')).render(

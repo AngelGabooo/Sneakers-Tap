@@ -1,6 +1,11 @@
 // public/sw.js
 // Service Worker para manejar Web Push
 
+const SW_VERSION = 'v3'
+console.log(`🔧 SW ${SW_VERSION} cargando…`)
+
+const APP_ORIGIN = 'https://sneakers-tap.vercel.app'
+
 self.addEventListener('install', (event) => {
   console.log('🔧 Service Worker instalado')
   self.skipWaiting()
@@ -11,7 +16,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
-// ⭐ Aquí llega la notificación push
+// ⭐ Push recibido
 self.addEventListener('push', (event) => {
   console.log('📬 Push recibido:', event)
 
@@ -20,7 +25,8 @@ self.addEventListener('push', (event) => {
     body: 'Nueva notificación',
     icon: '/favicon.ico',
     badge: '/favicon.ico',
-    url: '/',
+    url: APP_ORIGIN + '/',
+    view: null,
     tag: null,
     priority: 'normal',
   }
@@ -40,11 +46,13 @@ self.addEventListener('push', (event) => {
     icon: data.icon,
     badge: data.badge,
     tag: data.tag || undefined,
-    data: { url: data.url || '/' },
+    data: {
+      url: APP_ORIGIN + '/',
+      view: data.view || null,
+    },
     requireInteraction: data.priority === 'critical',
     vibrate: data.priority === 'critical' ? [200, 100, 200] : [100],
     silent: false,
-    // ⭐ Acciones rápidas (soportadas en Android/Desktop; iOS las ignora)
     actions: [
       { action: 'open', title: 'Ver' },
       { action: 'close', title: 'Cerrar' },
@@ -56,43 +64,55 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// ⭐ Al hacer clic en la notificación
+// ⭐ Click en notificación
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
   if (event.action === 'close') return
 
-  const url = event.notification.data?.url || '/'
+  const url = APP_ORIGIN + '/'
+  const view = event.notification.data?.view || null
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    (async () => {
+      const clients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      })
+
+      // Si ya hay una ventana abierta, enfocarla y avisar
       for (const client of clients) {
-        if (client.url.includes(self.location.origin)) {
-          client.focus()
-          client.navigate(url)
+        if (client.url.startsWith(APP_ORIGIN)) {
+          await client.focus()
+          client.postMessage({
+            type: 'NOTIFICATION_CLICK',
+            view,
+          })
           return
         }
       }
-      return self.clients.openWindow(url)
-    }),
+
+      // Si no hay ventana, abrir nueva con la vista en query
+      const targetUrl = view ? `${url}?view=${view}` : url
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl)
+      }
+    })(),
   )
 })
 
-// ⭐ NUEVO: cuando el navegador invalida la suscripción
-//    (pasa en Chrome/Android periódicamente y en iOS al reinstalar la PWA)
+// ⭐ Suscripción renovada
 self.addEventListener('pushsubscriptionchange', (event) => {
   console.log('🔄 Push subscription cambió, renovando…')
 
   event.waitUntil(
     (async () => {
       try {
-        // Re-suscribirse con la misma VAPID key que tenía antes
         const newSub = await self.registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: event.oldSubscription?.options?.applicationServerKey,
         })
 
-        // Avisar a todas las pestañas abiertas para que actualicen Supabase
         const clients = await self.clients.matchAll({
           type: 'window',
           includeUncontrolled: true,

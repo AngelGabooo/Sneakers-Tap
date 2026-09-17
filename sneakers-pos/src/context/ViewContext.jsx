@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react'
+// src/context/ViewContext.jsx
+import { createContext, useContext, useState, useEffect } from 'react'
 
 const ViewContext = createContext(null)
 
@@ -7,14 +8,35 @@ export function ViewProvider({ children, defaultView = 'dashboard' }) {
   const [viewParams, setViewParams] = useState({})
 
   /**
-   * Navegación simple entre vistas (mientras migramos a React Router).
-   * @param {string} view    - clave de la vista ('dashboard', 'products', etc.)
-   * @param {object} params  - parámetros opcionales (ej. { id: 'p_123' })
+   * Navegación simple entre vistas.
    */
   const navigate = (view, params = {}) => {
     setActiveView(view)
     setViewParams(params)
   }
+
+  // ⭐ Exponer navigate globalmente para el Service Worker
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__viewNavigate = (view, params = {}) => {
+        console.log('🔔 Navegando por notificación a:', view)
+        navigate(view, params)
+      }
+    }
+    return () => {
+      delete window.__viewNavigate
+    }
+  }, [])
+
+  // ⭐ Leer vista pendiente al montar (app abierta por click en notif)
+  useEffect(() => {
+    const pending = sessionStorage.getItem('pendingNotificationView')
+    if (pending) {
+      sessionStorage.removeItem('pendingNotificationView')
+      console.log('🔔 Vista pendiente:', pending)
+      setActiveView(pending)
+    }
+  }, [])
 
   return (
     <ViewContext.Provider value={{ activeView, viewParams, setActiveView, navigate }}>
