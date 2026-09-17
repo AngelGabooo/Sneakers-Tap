@@ -163,6 +163,12 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
           title: '🔔 Notificaciones push activadas',
           description: 'Recibirás alertas incluso con el navegador cerrado.',
         })
+      } else if (result.reason === 'ios-needs-install') {
+        setToast({
+          title: '📱 Instala la app en tu iPhone',
+          description:
+            'Para recibir notificaciones en iPhone, toca el botón Compartir en Safari → "Añadir a pantalla de inicio". Luego abre la app desde el ícono.',
+        })
       } else if (result.reason === 'denied') {
         setToast({
           title: 'Permiso denegado',
@@ -204,7 +210,9 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
   const pushSupported = isPushSupported()
 
   return (
-    <header className="h-16 bg-white dark:bg-dark-surface border-b border-gray-200 dark:border-dark-border pl-4 lg:pl-6 pr-3 lg:pr-5 flex items-center gap-3">
+    // ⭐ Añadido: safe-header  (respeta el notch del iPhone)
+    //    Se eliminó 'h-16' porque .safe-header ya define la altura correcta.
+    <header className="safe-header bg-white dark:bg-dark-surface border-b border-gray-200 dark:border-dark-border pl-4 lg:pl-6 pr-3 lg:pr-5 flex items-center gap-3">
       {/* Botón menú (móvil) */}
       <button
         onClick={onOpenMobile}
@@ -392,11 +400,36 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
               </div>
             )}
 
+            {/* ⭐ NUEVO: Aviso especial iOS (necesita instalar PWA) */}
+            {pushStatus === 'ios-needs-install' && (
+              <div className="px-5 py-3.5 bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/50">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-white dark:bg-dark-card flex items-center justify-center shrink-0 shadow-sm text-base">
+                    📱
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                      Instala la app en tu iPhone
+                    </p>
+                    <p className="text-[11px] text-gray-700 dark:text-dark-muted mt-1 leading-relaxed">
+                      Apple requiere que instales la app primero. Pasos:
+                    </p>
+                    <ol className="text-[11px] text-gray-700 dark:text-dark-muted mt-1.5 space-y-0.5 list-decimal list-inside">
+                      <li>Toca el botón <strong>Compartir</strong> (⬆️)</li>
+                      <li>Elige <strong>"Añadir a pantalla de inicio"</strong></li>
+                      <li>Abre la app desde el ícono</li>
+                      <li>Vuelve aquí y activa las notificaciones</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Permiso denegado */}
             {pushSupported && pushStatus === 'denied' && (
               <div className="px-5 py-3 bg-red-50/80 dark:bg-red-950/30 border-b border-red-100 dark:border-red-900/50">
                 <p className="text-[11px] text-brand-red">
-                  🔕 Permiso denegado. Habilítalo desde la barra del navegador (candado).
+                  🔕 Permiso denegado. Habilítalo desde la configuración del sistema.
                 </p>
               </div>
             )}
@@ -414,7 +447,7 @@ export default function Header({ onOpenMobile, user: userProp, period, onPeriodC
             )}
 
             {/* No soportado */}
-            {!pushSupported && (
+            {!pushSupported && pushStatus !== 'ios-needs-install' && (
               <div className="px-5 py-3 bg-amber-50/80 dark:bg-amber-950/30 border-b border-amber-100 dark:border-amber-900/50">
                 <p className="text-[11px] text-amber-800 dark:text-amber-300">
                   ⚠️ Tu navegador no soporta notificaciones push. Prueba Chrome o Firefox.

@@ -14,4 +14,57 @@
     @apply dark:bg-dark-bg dark:text-dark-text;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
+
+  /* ============================================================
+     iOS PWA: Safe Areas (notch / Dynamic Island / home indicator)
+     ============================================================ */
+
+  /* El body respeta los lados (útil en landscape) */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+@layer utilities {
+  /* ----------------------------------------------------------
+     Header: respeta el notch arriba.
+     Se suma el safe-area-inset-top a la altura (64px = 4rem).
+     En Android/desktop, env() = 0, así que no cambia nada.
+     ---------------------------------------------------------- */
+  .safe-header {
+    padding-top: env(safe-area-inset-top, 0px);
+    height: calc(4rem + env(safe-area-inset-top, 0px));
+  }
+
+  /* ----------------------------------------------------------
+     Sidebar: respeta notch arriba y home indicator abajo.
+     Solo aplica en móvil (en desktop no hay notch).
+     ---------------------------------------------------------- */
+  .safe-sidebar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* ----------------------------------------------------------
+     Main: respeta el home indicator inferior del iPhone.
+     ---------------------------------------------------------- */
+  .safe-main {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 1024px) {
+    /* En desktop no hay notch ni home indicator, resetea todo */
+    .safe-header {
+      padding-top: 0;
+      height: 4rem;
+    }
+    .safe-sidebar {
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    .safe-main {
+      padding-bottom: 1.5rem;
+    }
+  }
 }

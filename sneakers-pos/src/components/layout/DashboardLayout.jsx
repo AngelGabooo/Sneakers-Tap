@@ -31,7 +31,8 @@ export default function DashboardLayout({
           period={period}
           onPeriodChange={onPeriodChange}
         />
-        <main className="flex-1 p-4 lg:p-6">{children}</main>
+        {/* ⭐ Añadido: safe-main (respeta el home indicator inferior del iPhone) */}
+        <main className="safe-main flex-1 p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )

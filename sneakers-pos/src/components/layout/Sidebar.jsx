@@ -128,8 +128,10 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
         />
       )}
 
+      {/* ⭐ Añadido: safe-sidebar (respeta notch arriba y home indicator abajo en móvil) */}
       <aside
         className={`
+          safe-sidebar
           fixed lg:sticky top-0 left-0 z-50
           h-screen w-72 shrink-0
           flex flex-col
