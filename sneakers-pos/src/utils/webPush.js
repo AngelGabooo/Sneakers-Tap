@@ -3,9 +3,23 @@ import { supabase } from '../lib/supabase'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
 
-/**
- * Convierte la VAPID key de base64 URL-safe a Uint8Array.
- */
+// ⭐ NUEVO: detección iOS
+function isIOS() {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
+
+// ⭐ NUEVO: ¿corre como PWA instalada?
+function isStandalone() {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  )
+}
+
+// -------------------- (SIN CAMBIOS) --------------------
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -19,20 +33,30 @@ function urlBase64ToUint8Array(base64String) {
 
 /**
  * ¿El navegador soporta Web Push?
+ * ⭐ AHORA: en iOS, solo si está instalada como PWA.
  */
 export function isPushSupported() {
-  return (
+  const hasAPIs =
     typeof window !== 'undefined' &&
     'serviceWorker' in navigator &&
     'PushManager' in window &&
     'Notification' in window
-  )
+
+  if (!hasAPIs) return false
+  if (isIOS() && !isStandalone()) return false
+
+  return true
 }
 
 /**
- * Registra el Service Worker (sin pedir permiso).
- * ⭐ Esta función es la que falta en tu archivo actual.
+ * ⭐ NUEVO: ¿Estamos en iOS pero NO instalada como PWA?
+ * Útil para mostrar mensaje específico en la UI.
  */
+export function needsIOSInstall() {
+  return isIOS() && !isStandalone()
+}
+
+// -------------------- (SIN CAMBIOS) --------------------
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return null
   try {
@@ -47,9 +71,6 @@ export async function registerServiceWorker() {
   }
 }
 
-/**
- * Obtiene la suscripción push existente (si hay).
- */
 export async function getExistingSubscription() {
   if (!isPushSupported()) return null
   try {
@@ -63,17 +84,24 @@ export async function getExistingSubscription() {
 
 /**
  * Suscribe al usuario a Web Push.
+ * ⭐ Ahora guarda la VAPID key en IndexedDB para el SW (iOS).
  */
 export async function subscribeToPush(userId) {
-  if (!isPushSupported()) return { ok: false, reason: 'unsupported' }
+  if (!isPushSupported()) {
+    if (needsIOSInstall()) return { ok: false, reason: 'ios-needs-install' }
+    return { ok: false, reason: 'unsupported' }
+  }
   if (!VAPID_PUBLIC_KEY) return { ok: false, reason: 'no-vapid' }
 
   try {
+    // ⭐ NUEVO: guardar VAPID en IndexedDB para que el SW pueda re-suscribir
+    await saveVapidKeyToIDB(VAPID_PUBLIC_KEY)
+
     // 1. Pedir permiso
     const permission = await Notification.requestPermission()
     if (permission !== 'granted') return { ok: false, reason: 'denied' }
 
-    // 2. Registrar SW (o esperar a que esté listo)
+    // 2. Registrar SW (o esperar)
     let registration = await navigator.serviceWorker.getRegistration()
     if (!registration) {
       registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -115,9 +143,32 @@ export async function subscribeToPush(userId) {
   }
 }
 
-/**
- * Cancela la suscripción push.
- */
+// ⭐ NUEVO helper
+function saveVapidKeyToIDB(vapidPublic) {
+  return new Promise((resolve) => {
+    const req = indexedDB.open('sneakers-push', 1)
+    req.onerror = () => resolve(false)
+    req.onsuccess = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains('keys')) {
+        db.close()
+        return resolve(false)
+      }
+      const tx = db.transaction('keys', 'readwrite')
+      tx.objectStore('keys').put({ key: 'vapidPublic', value: vapidPublic })
+      tx.oncomplete = () => resolve(true)
+      tx.onerror = () => resolve(false)
+    }
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result
+      if (!db.objectStoreNames.contains('keys')) {
+        db.createObjectStore('keys', { keyPath: 'key' })
+      }
+    }
+  })
+}
+
+// -------------------- (SIN CAMBIOS) --------------------
 export async function unsubscribeFromPush() {
   if (!isPushSupported()) return { ok: false, reason: 'unsupported' }
   try {
@@ -135,29 +186,17 @@ export async function unsubscribeFromPush() {
   }
 }
 
-/**
- * Devuelve el estado actual del push.
- * - 'unsupported' → navegador no soporta
- * - 'denied'      → permiso denegado
- * - 'default'     → permiso sin pedir
- * - 'granted'     → permiso concedido pero sin suscripción
- * - 'subscribed'  → suscrito y guardado
- */
 export async function getPushStatus() {
-  if (!isPushSupported()) return 'unsupported'
+  if (!isPushSupported()) {
+    return needsIOSInstall() ? 'ios-needs-install' : 'unsupported'
+  }
   if (Notification.permission === 'denied') return 'denied'
   if (Notification.permission === 'default') return 'default'
   const sub = await getExistingSubscription()
   return sub ? 'subscribed' : 'granted'
 }
 
-/**
- * Escucha los mensajes del SW cuando renueva la suscripción.
- * El SW manda `PUSH_SUBSCRIPTION_CHANGED` con la nueva suscripción,
- * y aquí la guardamos en Supabase.
- *
- * Llama esto una vez al montar la app (ver main.jsx o AuthContext).
- */
+// -------------------- (SIN CAMBIOS) --------------------
 export function listenForSubscriptionChanges(userId) {
   if (typeof navigator === 'undefined') return () => {}
   if (!('serviceWorker' in navigator)) return () => {}
