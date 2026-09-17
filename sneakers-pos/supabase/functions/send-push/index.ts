@@ -32,6 +32,61 @@ const VIEW_BY_TYPE: Record<string, string> = {
   audit:      'audit',
 }
 
+// ⭐ Reintentos con backoff exponencial
+const MAX_RETRIES = 3
+const BASE_DELAY_MS = 1000 // 1s, 2s, 4s
+
+// Errores que SÍ vale la pena reintentar
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
+
+function isRetryable(err: any): boolean {
+  const code = err?.statusCode
+  if (!code) return true // timeout / network error → reintentar
+  if (code >= 500) return true
+  return RETRYABLE_STATUS.has(code)
+}
+
+async function sendWithRetry(sub: any, payload: string): Promise<{ ok: boolean; error?: any }> {
+  let lastError: any = null
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        payload,
+      )
+      return { ok: true }
+    } catch (err: any) {
+      lastError = err
+
+      // Errores permanentes: NO reintentar (suscripción caducada, keys inválidas)
+      if (!isRetryable(err)) {
+        return { ok: false, error: err }
+      }
+
+      // Último intento → devolver error
+      if (attempt === MAX_RETRIES - 1) {
+        console.warn(
+          `⚠️ Push falló tras ${MAX_RETRIES} intentos para ${sub.endpoint.slice(0, 40)}: ${err.message}`,
+        )
+        return { ok: false, error: err }
+      }
+
+      // Backoff exponencial: 1s, 2s, 4s...
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt)
+      console.log(
+        `🔁 Reintento ${attempt + 1}/${MAX_RETRIES} en ${delay}ms (status ${err.statusCode || 'net'})`,
+      )
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+
+  return { ok: false, error: lastError }
+}
+
 serve(async (req) => {
   try {
     const { notification_id } = await req.json()
@@ -82,53 +137,56 @@ serve(async (req) => {
     // 3. Determinar vista destino
     const targetView = VIEW_BY_TYPE[notif.type] || 'dashboard'
 
+    // ⭐ Extraer IDs útiles del meta para deep links
+    const meta = notif.meta || {}
+    const saleId = meta.saleId || null
+    const sessionId = meta.sessionId || null
+    const productId = meta.productId || null
+
     // 4. Armar payload
     const payload = JSON.stringify({
       title: notif.title,
       body: notif.description,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       tag: notif.id,
       priority: notif.priority,
+      // ⭐ Sonido custom solo se usa en Android. iOS lo ignora.
+      sound: notif.priority === 'critical' ? '/sounds/critical.wav' : undefined,
       url: `${APP_ORIGIN}/`,
       view: targetView,
       notifId: notif.id,
+      // ⭐ Deep link data
+      saleId,
+      sessionId,
+      productId,
     })
 
-    // 5. Enviar a cada suscripción
+    // 5. Enviar a cada suscripción (con reintentos)
     let sent = 0
+    let retried = 0
     const errors: any[] = []
 
     for (const sub of subs) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: {
-              p256dh: sub.p256dh,
-              auth: sub.auth,
-            },
-          },
-          payload,
-        )
+      const result = await sendWithRetry(sub, payload)
+
+      if (result.ok) {
         sent++
         console.log(`✅ Push enviado a ${sub.user_agent?.slice(0, 40) || sub.user_id}`)
-      } catch (err: any) {
-        console.error(`❌ Error push a ${sub.user_id}:`, err.message)
+      } else {
+        const err = result.error
+        console.error(`❌ Push falló a ${sub.user_id}:`, err?.message)
         errors.push({
           user_id: sub.user_id,
           endpoint: sub.endpoint.slice(0, 40),
-          error: err.message,
-          statusCode: err.statusCode,
+          error: err?.message,
+          statusCode: err?.statusCode,
         })
 
-        // Si la suscripción caducó, borrarla
-        if (err.statusCode === 410 || err.statusCode === 404) {
+        // Suscripción caducada → borrar
+        if (err?.statusCode === 410 || err?.statusCode === 404) {
           console.log(`🗑️ Borrando suscripción caducada de ${sub.user_id}`)
-          await supabase
-            .from('push_subscriptions')
-            .delete()
-            .eq('id', sub.id)
+          await supabase.from('push_subscriptions').delete().eq('id', sub.id)
         }
       }
     }

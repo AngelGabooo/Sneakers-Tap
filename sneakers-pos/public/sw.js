@@ -1,13 +1,12 @@
 // public/sw.js
-// Service Worker Web Push — compatible Android + iOS 16.4+ (PWA)
-// v4: soporte iOS (Safari + PWA instalada)
+// Service Worker Web Push — Android + iOS 16.4+ (PWA)
+// v5: sonido custom (Android), deep links a ventas, mejor manejo de datos
 
-const SW_VERSION = 'v4'
+const SW_VERSION = 'v5'
 console.log(`🔧 SW ${SW_VERSION} cargando…`)
 
 const APP_ORIGIN = 'https://sneakers-tap.vercel.app'
 
-// ⭐ Iconos PWA (los crearemos en el paso 3)
 const ICON = '/icon-192.png'
 const BADGE = '/icon-192.png'
 
@@ -37,7 +36,11 @@ self.addEventListener('push', (event) => {
     url: APP_ORIGIN + '/',
     view: null,
     notifId: null,
+    saleId: null,
+    sessionId: null,
+    productId: null,
     priority: 'normal',
+    sound: null,
   }
 
   try {
@@ -50,9 +53,6 @@ self.addEventListener('push', (event) => {
     if (event.data) data.body = event.data.text()
   }
 
-  // ⚠️ iOS IGNORA: actions, vibrate, requireInteraction, silent.
-  //    Los omitimos para que Safari no tire warnings.
-  //    En Android no cambia nada — siguen funcionando sin ellos.
   const options = {
     body: data.body || ' ',
     icon: data.icon,
@@ -62,7 +62,16 @@ self.addEventListener('push', (event) => {
       url: data.url || (APP_ORIGIN + '/'),
       view: data.view || null,
       notifId: data.notifId || null,
+      saleId: data.saleId || null,
+      sessionId: data.sessionId || null,
+      productId: data.productId || null,
+      priority: data.priority || 'normal',
     },
+    // ⭐ Sonido custom — Android lo respeta, iOS lo ignora.
+    //    Guard: solo añadimos si no es null para no romper iOS.
+    ...(data.sound ? { sound: data.sound } : {}),
+    // ⭐ requireInteraction solo si es crítico (Android). iOS lo ignora.
+    ...(data.priority === 'critical' ? { requireInteraction: true } : {}),
   }
 
   event.waitUntil(self.registration.showNotification(data.title, options))
@@ -73,12 +82,15 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  // En iOS no hay actions, así que event.action siempre es ''
   if (event.action === 'close') return
 
   const url = event.notification.data?.url || (APP_ORIGIN + '/')
   const view = event.notification.data?.view || null
   const notifId = event.notification.data?.notifId || null
+  // ⭐ Deep link IDs
+  const saleId = event.notification.data?.saleId || null
+  const sessionId = event.notification.data?.sessionId || null
+  const productId = event.notification.data?.productId || null
 
   event.waitUntil(
     (async () => {
@@ -87,7 +99,7 @@ self.addEventListener('notificationclick', (event) => {
         includeUncontrolled: true,
       })
 
-      // Si ya hay una ventana abierta, enfocarla y avisar
+      // Si ya hay ventana abierta, enfocarla y avisar
       for (const client of clientsList) {
         if (client.url.startsWith(APP_ORIGIN)) {
           await client.focus()
@@ -95,13 +107,25 @@ self.addEventListener('notificationclick', (event) => {
             type: 'NOTIFICATION_CLICK',
             view,
             notifId,
+            saleId,
+            sessionId,
+            productId,
           })
           return
         }
       }
 
-      // Si no, abrir nueva con la vista en query
-      const targetUrl = view ? `${url}?view=${view}` : url
+      // Si no, abrir nueva. Los deep links van en query params
+      // para que la app los lea al arrancar.
+      const params = new URLSearchParams()
+      if (view) params.set('view', view)
+      if (saleId) params.set('saleId', saleId)
+      if (sessionId) params.set('sessionId', sessionId)
+      if (productId) params.set('productId', productId)
+
+      const qs = params.toString()
+      const targetUrl = qs ? `${url}?${qs}` : url
+
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl)
       }
@@ -109,7 +133,7 @@ self.addEventListener('notificationclick', (event) => {
   )
 })
 
-// -------------------- Suscripción renovada (iOS rota la sub) --------------------
+// -------------------- Suscripción renovada --------------------
 
 self.addEventListener('pushsubscriptionchange', (event) => {
   console.log('🔄 Push subscription cambió, renovando…')

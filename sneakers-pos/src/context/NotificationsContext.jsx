@@ -12,6 +12,15 @@ import {
 
 const NotificationsContext = createContext(null)
 
+// ⭐ Sonido crítico (mismo helper que en main.jsx)
+function playCriticalSound() {
+  try {
+    const audio = new Audio('/sounds/critical.wav')
+    audio.volume = 0.7
+    audio.play().catch(() => {})
+  } catch {}
+}
+
 export function NotificationsProvider({ children }) {
   const { user } = useAuth()
   const { isOnline } = useNetwork()
@@ -49,7 +58,7 @@ export function NotificationsProvider({ children }) {
     return () => { alive = false; clearTimeout(t) }
   }, [isOnline])
 
-  // Push del navegador
+  // ⭐ Web Push + sonido crítico (app en foreground)
   useEffect(() => {
     if (!user) return
     if (browserPermission !== 'granted') return
@@ -60,13 +69,23 @@ export function NotificationsProvider({ children }) {
       notifiedIdsRef.current.add(n.id)
       if (n.actorName === user.name) return
 
+      // ⭐ Sonido crítico (solo si la app está abierta)
+      if (n.priority === 'critical') {
+        playCriticalSound()
+      }
+
       showBrowserNotification({
         title: n.title || 'SNEAKERS',
         body: n.description || '',
-        icon: '/favicon.ico',
+        icon: '/icon-192.png',
         tag: n.id,
         priority: n.priority === 'critical' ? 'critical' : 'default',
-        onClick: () => { try { window.focus() } catch {} },
+        onClick: () => {
+          try { window.focus() } catch {}
+          // ⭐ Deep link al hacer click
+          const meta = n.meta || {}
+          if (meta.saleId) sessionStorage.setItem('pendingSaleId', meta.saleId)
+        },
       })
     })
   }, [notifications, user, browserPermission])
