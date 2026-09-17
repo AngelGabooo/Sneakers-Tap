@@ -16,4 +16,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
   },
+  realtime: {
+    params: {
+      // ⭐ Limita eventos por segundo para no saturar (default: 10)
+      eventsPerSecond: 10,
+    },
+  },
 })

@@ -58,7 +58,8 @@ function inPeriod(sale, period, customFrom, customTo) {
 export default function SalesHistory() {
   const { navigate, viewParams } = useView()
   const { user } = useAuth()
-  const { sales, updateSale, cancelSale } = useSales()
+  // ⭐ Añadido `refresh` del context
+  const { sales, updateSale, cancelSale, refresh } = useSales()
   const { products } = useProducts()
 
   const [loading, setLoading] = useState(true)
@@ -92,6 +93,22 @@ export default function SalesHistory() {
     setLoading(true)
     const t = setTimeout(() => setLoading(false), 250)
     return () => clearTimeout(t)
+  }, [])
+
+  // ⭐ NUEVO: refrescar datos al montar la vista.
+  //    Esto baja lo más reciente de Supabase a IndexedDB y actualiza el state.
+  //    Es un seguro por si Realtime se desconectó mientras la app estaba en background.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        await refresh()
+      } catch (err) {
+        if (alive) console.warn('⚠️ Refresh inicial falló:', err.message)
+      }
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const filtered = useMemo(() => {

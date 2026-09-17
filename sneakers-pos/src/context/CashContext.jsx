@@ -9,18 +9,17 @@ import {
 } from 'react'
 import { cashRepo } from '../repositories/cashRepo'
 import { useNetwork } from './NetworkContext'
+import { supabase } from '../lib/supabase'  // ⭐ NUEVO
 
 const CashContext = createContext(null)
 
-/**
- * Sesiones de caja con estrategia offline-first.
- */
 export function CashProvider({ children }) {
   const { isOnline } = useNetwork()
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
+  const channelRef = useRef(null)  // ⭐ NUEVO
 
   const loadLocal = useCallback(async () => {
     try {
@@ -64,6 +63,59 @@ export function CashProvider({ children }) {
     return () => clearTimeout(timer)
   }, [isOnline, syncRemote])
 
+  // ⭐ ============================================================
+  // ⭐ REALTIME para cajas
+  // ⭐ ============================================================
+  useEffect(() => {
+    if (!isOnline) return
+
+    let debounceTimer = null
+    const scheduleRefresh = (reason) => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(async () => {
+        console.log(`🔄 Realtime cash → syncRemote (${reason})`)
+        await syncRemote()
+      }, 800)
+    }
+
+    const channel = supabase
+      .channel('cash-realtime')
+
+      // Apertura / cierre de caja
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cash_sessions' },
+        (payload) => {
+          console.log('💰 Realtime cash_sessions:', payload.eventType)
+          scheduleRefresh(`cash_sessions ${payload.eventType}`)
+        },
+      )
+
+      // Movimientos de caja
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cash_movements' },
+        (payload) => {
+          console.log('💵 Realtime cash_movements:', payload.eventType)
+          scheduleRefresh(`cash_movements ${payload.eventType}`)
+        },
+      )
+
+      .subscribe((status) => {
+        console.log('📡 Realtime cash status:', status)
+      })
+
+    channelRef.current = channel
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [isOnline, syncRemote])
+
   // -----------------------------------------------------------------
   // API
   // -----------------------------------------------------------------
@@ -100,7 +152,6 @@ export function CashProvider({ children }) {
 
   const addMovement = useCallback(async (payload) => {
     const movement = await cashRepo.addMovement(payload)
-    // Actualizar el estado local
     setSessions((list) =>
       list.map((s) => {
         if (s.id !== payload.sessionId) return s
