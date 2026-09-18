@@ -251,17 +251,30 @@ export function AuthProvider({ children }) {
   /**
    * Logout.
    */
+  /**
+   * Logout.
+   */
   const logout = useCallback(async () => {
+    // ⭐ NUEVO: detectar si estamos offline antes de tocar el snapshot
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine
+
     try {
-      // ⭐ NUEVO: cerrar la sesión ANTES de signOut
+      // ⭐ Cerrar la sesión ANTES de signOut
       await endSession('Logout manual')
       await authService.signOut()
     } catch (err) {
       console.warn('Error al cerrar sesión:', err)
     }
-    // ⭐ NUEVO: al hacer logout explícito, limpiar snapshot offline.
-    //    El usuario quiere salir del dispositivo.
-    clearOfflineSnapshot()
+
+    // ⭐ NUEVO: solo borrar el snapshot si estamos online.
+    //    Si estamos offline, conservamos el snapshot para permitir
+    //    que el usuario vuelva a entrar sin internet.
+    if (online) {
+      clearOfflineSnapshot()
+    } else {
+      console.log('🟡 Logout offline: conservando snapshot para permitir reentrada sin red')
+    }
+
     setUser(null)
   }, [endSession])
 
