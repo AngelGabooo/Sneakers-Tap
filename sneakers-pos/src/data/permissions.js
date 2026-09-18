@@ -209,6 +209,8 @@ export const MODULES = [
       { key: 'settings.taxes',          label: 'Configurar impuestos' },
       { key: 'settings.payments',       label: 'Configurar métodos de pago' },
       { key: 'settings.system',         label: 'Configurar parámetros del sistema', critical: true },
+      { key: 'support.view', label: 'Ver soporte técnico', group: 'Sistema' },
+
     ],
   },
 ]

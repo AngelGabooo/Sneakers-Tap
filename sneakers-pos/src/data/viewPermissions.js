@@ -57,6 +57,7 @@ export const VIEW_PERMISSIONS = {
 
   // Sistema
   settings:               'settings.view',
+  support:                'support.view',
 }
 
 /**
@@ -81,8 +82,9 @@ export const FALLBACK_VIEW_ORDER = [
   'pos',
   'cash-current',
   'sales-history',
-  'credits',       // ⭐ NUEVO
+  'credits',
   'dashboard',
   'products',
   'inventory',
+  'support',           // ⭐ NUEVO
 ]

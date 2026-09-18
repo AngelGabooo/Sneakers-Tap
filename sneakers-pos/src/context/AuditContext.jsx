@@ -2,8 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { auditRepo } from '../repositories/auditRepo'
 import { useNetwork } from './NetworkContext'
-import { useAuth } from './AuthContext'                  // ⭐ NUEVO
-import { supabase } from '../lib/supabase'               // ⭐ NUEVO
+import { useAuth } from './AuthContext'
+import { supabase } from '../lib/supabase'
 
 const AuditContext = createContext(null)
 
@@ -61,12 +61,12 @@ function getPeriodRange(period, customFrom, customTo) {
 
 export function AuditProvider({ children }) {
   const { isOnline } = useNetwork()
-  const { user } = useAuth()                              // ⭐ NUEVO
+  const { user } = useAuth()
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
-  const channelRef = useRef(null)                         // ⭐ NUEVO
+  const channelRef = useRef(null)
 
   const [search, setSearch] = useState('')
   const [period, setPeriod] = useState('last30')
@@ -218,12 +218,43 @@ export function AuditProvider({ children }) {
     })
   }, [events, period, customFrom, customTo, search, filters, quickFilter])
 
+  // ⭐ Stats calculados desde filteredEvents
   const stats = useMemo(() => {
-    const total = filteredEvents.length
-    const admin = filteredEvents.filter((e) => ['users', 'roles', 'settings'].includes(e.module)).length
-    const critical = filteredEvents.filter((e) => e.level === 'critical').length
-    const activeUsers = new Set(filteredEvents.map((e) => e.userName).filter(Boolean)).size
-    return { total, admin, critical, activeUsers }
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const list = Array.isArray(filteredEvents) ? filteredEvents : []
+
+    let todayCount = 0
+    let criticalCount = 0
+    let importantCount = 0
+
+    list.forEach((ev) => {
+      if (!ev) return
+      const d = new Date(ev.createdAt)
+      if (d >= today) todayCount++
+      if (ev.level === 'critical') criticalCount++
+      if (ev.level === 'important') importantCount++
+    })
+
+    const admin = list.filter(
+      (e) => ['users', 'roles', 'settings'].includes(e.module),
+    ).length
+
+    const activeUsers = new Set(
+      list.map((e) => e.userName).filter(Boolean),
+    ).size
+
+    return {
+      todayCount,
+      importantCount,
+      criticalCount,
+      total: list.length,
+      // mantenemos los nombres viejos por compatibilidad:
+      critical: criticalCount,
+      admin,
+      activeUsers,
+    }
   }, [filteredEvents])
 
   const security = useMemo(() => {

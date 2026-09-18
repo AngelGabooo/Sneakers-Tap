@@ -39,6 +39,7 @@ import Reports from './pages/Reports'
 import ReportDetail from './pages/ReportDetail'
 import Audit from './pages/Audit'
 import Settings from './pages/Settings'
+import Support from './pages/Support'
 
 const VIEWS = {
   dashboard:              Dashboard,
@@ -74,6 +75,7 @@ const VIEWS = {
   'report-detail':        ReportDetail,
   audit:                  Audit,
   settings:               Settings,
+  support:                Support,
 }
 
 export default function App() {

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ShoppingBag,
   Wallet, Users, UserCog, ShieldCheck, BarChart3, Bell,
   History, Settings, X, Activity, AlertTriangle, SlidersHorizontal,
-  Receipt, HandCoins,        // ⭐ NUEVO icono
+  Receipt, HandCoins, Headphones,        // ⭐ NUEVO
 } from 'lucide-react'
 import SneakersLogo from '../login/SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
@@ -65,6 +65,8 @@ const NAV_SECTIONS = [
   {
     label: 'Sistema',
     items: [
+
+      { key: 'support',  label: 'Soporte técnico', icon: Headphones, permission: 'support.view' },
       { key: 'settings', label: 'Configuración', icon: Settings, permission: 'settings.view' },
     ],
   },

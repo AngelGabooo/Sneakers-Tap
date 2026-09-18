@@ -62,7 +62,9 @@ export default function Audit() {
         filtersActive={filtersActive}
       />
 
+      {/* ⭐ Ahora se pasa stats en lugar de events */}
       <AuditStats stats={stats} />
+
       <AuditSecurityStatus status={security} />
 
       <AuditToolbar
