@@ -45,8 +45,8 @@ export default function LoginForm() {
   const canOffline = hasOfflineSnapshot()
 
   return (
-    <main className="w-full md:w-1/2 lg:w-1/2 flex items-center justify-center
-                     bg-brand-surface dark:bg-dark-bg min-h-screen px-6 py-10">
+  <main className="w-full md:w-1/2 lg:w-1/2 flex items-center justify-center
+                     bg-white dark:bg-dark-bg min-h-screen px-6 py-10">
       <div className="w-full max-w-[440px]">
         <div className="flex justify-end mb-6">
           <ThemeToggle />

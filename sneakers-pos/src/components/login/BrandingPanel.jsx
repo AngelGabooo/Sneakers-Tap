@@ -1,35 +1,44 @@
+// src/components/login/BrandingPanel.jsx
 import SneakersLogo from './SneakersLogo'
 
 export default function BrandingPanel() {
   return (
     <aside className="relative hidden md:flex md:w-1/2 lg:w-1/2 overflow-hidden
-                      bg-gradient-to-br from-brand-blue to-brand-blueDark
-                      dark:from-[#0F1F4D] dark:to-[#0A1330]">
-      <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-white/5" />
-      <div className="absolute bottom-0 left-0 w-96 h-96 rounded-full bg-brand-blueDark/40 blur-2xl" />
-      <div className="absolute top-1/3 right-16 w-2 h-16 rounded-full bg-brand-red/80" />
+                      bg-gradient-to-br from-[#0A1F44] via-brand-blue to-[#0A1330]
+                      dark:from-[#050B1F] dark:via-[#0A1F44] dark:to-[#050B1F]">
+      {/* Círculos decorativos de fondo */}
+      <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-white/5" />
+      <div className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full bg-brand-blue/20 blur-3xl" />
+      <div className="absolute top-1/4 left-20 w-1.5 h-12 rounded-full bg-white/30" />
 
-      <div className="relative z-10 flex flex-col justify-between w-full p-12 lg:p-16 text-white">
+      {/* Contenido */}
+      <div className="relative z-10 flex flex-col w-full p-12 lg:p-16 text-white">
+
+        {/* Logo en la esquina superior */}
         <SneakersLogo variant="light" />
 
-        <div className="max-w-md">
-          <h2 className="text-4xl lg:text-5xl font-extrabold leading-tight tracking-tight">
-            Todo tu negocio,
-            <br />
-            <span className="text-white/80">bajo control.</span>
-          </h2>
-          <p className="mt-5 text-white/75 text-base lg:text-lg leading-relaxed">
-            Administra tus ventas, inventario, caja y productos desde un solo lugar.
-          </p>
+        {/* Logo principal — centrado verticalmente */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="relative w-full max-w-[520px] mt-6 lg:mt-10">
+            {/* Halo suave detrás del logo */}
+            <div className="absolute inset-0 bg-brand-blue/30 blur-3xl rounded-full scale-90" />
+
+            {/* Logo flotando */}
+            <img
+              src="/images/sneakers-tap-logo.png"
+              alt="Sneakers Tap"
+              className="relative w-full h-auto object-contain
+                         drop-shadow-[0_20px_40px_rgba(0,0,0,0.45)]"
+            />
+          </div>
         </div>
 
-        <div className="relative mt-8">
-          <img
-            src="/images/sneaker-hero.png"
-            alt="Sneaker Sneakers"
-            className="w-full max-w-md mx-auto drop-shadow-2xl"
-            onError={(e) => { e.currentTarget.style.display = 'none' }}
-          />
+        {/* Crédito de desarrollo — abajo, letras pequeñas */}
+        <div className="text-center">
+          <p className="text-[11px] tracking-wider uppercase
+                        text-white/40 font-medium">
+            Desarrollado por <span className="text-white/60 font-semibold">Biomey</span>
+          </p>
         </div>
       </div>
     </aside>
