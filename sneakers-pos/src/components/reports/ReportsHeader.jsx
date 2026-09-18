@@ -19,9 +19,6 @@ export default function ReportsHeader({ onNew, onExport }) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        <Button variant="secondary" icon={Download} onClick={onExport}>
-          Exportar
-        </Button>
         <Button variant="primary" icon={Plus} onClick={onNew}>
           Crear reporte
         </Button>
