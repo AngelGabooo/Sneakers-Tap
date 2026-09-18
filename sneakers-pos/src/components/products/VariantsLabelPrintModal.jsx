@@ -9,7 +9,7 @@ const PRINT_SERVER = 'http://localhost:3001'
 
 // Etiqueta DK-1201: 29mm × 90mm → proporción 3.103 : 1
 const LABEL_W = 360
-const LABEL_H = 116  // 360 / 3.103 ≈ 116
+const LABEL_H = 120  // un poco más alto para que respire
 
 /**
  * Expande cada variante en tantas etiquetas como stock tenga.
@@ -62,7 +62,7 @@ export default function VariantsLabelPrintModal({
     setProgress({ current: 0, total: totalLabels })
 
     try {
-      // 1) Convertir cada etiqueta a PNG
+      // 1) Convertir cada etiqueta a PNG (sin rotar; el driver rota)
       const images = []
       for (let i = 0; i < labels.length; i++) {
         const label = labels[i]
@@ -190,7 +190,7 @@ export default function VariantsLabelPrintModal({
                       height: `${LABEL_H}px`,
                       background: '#ffffff',
                       color: '#111827',
-                      padding: '8px 14px',
+                      padding: '12px 20px',
                       boxSizing: 'border-box',
                       fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
                       display: 'flex',
@@ -212,6 +212,7 @@ export default function VariantsLabelPrintModal({
                         flexDirection: 'column',
                         justifyContent: 'center',
                         gap: '2px',
+                        paddingLeft: '4px',
                       }}
                     >
                       <div
@@ -276,7 +277,7 @@ export default function VariantsLabelPrintModal({
                     <div
                       style={{
                         width: '1px',
-                        height: '80%',
+                        height: '75%',
                         background: '#e5e7eb',
                         flexShrink: 0,
                       }}
@@ -289,30 +290,32 @@ export default function VariantsLabelPrintModal({
                         flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: '3px',
+                        gap: '4px',
                         flexShrink: 0,
+                        width: '140px',
+                        paddingRight: '4px',
                       }}
                     >
                       {codeType === 'qr' ? (
-                        <QrCodeDisplay value={v.barcode} size={64} />
+                        <QrCodeDisplay value={v.barcode} size={56} />
                       ) : (
                         <BarcodeDisplay
                           value={v.barcode}
                           format="CODE128"
-                          height={40}
-                          width={1}
-                          fontSize={8}
+                          height={36}
+                          width={0.85}
+                          fontSize={7}
                         />
                       )}
 
                       {product.salePrice != null && (
                         <div
                           style={{
-                            fontSize: '16px',
+                            fontSize: '15px',
                             fontWeight: 800,
                             color: '#111827',
                             lineHeight: 1,
-                            marginTop: '2px',
+                            marginTop: '4px',
                           }}
                         >
                           ${Number(product.salePrice).toLocaleString('es-MX')}

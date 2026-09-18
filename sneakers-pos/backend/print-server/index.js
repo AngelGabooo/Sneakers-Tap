@@ -219,7 +219,7 @@ app.post('/print-label', async (req, res) => {
         printerName: LABEL_PRINTER_NAME,
         paperWidth: 114,   // DK-1201 29mm
         paperHeight: 354,  // DK-1201 90mm
-        landscape: false,  // ⚠️ si sale rotada, cambia a true
+        landscape: true,   // ✅ el driver rota
       })
       printed++
     }

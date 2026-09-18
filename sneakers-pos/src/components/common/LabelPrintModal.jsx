@@ -90,7 +90,7 @@ export default function LabelPrintModal({
               height: `${LABEL_H}px`,
               background: '#ffffff',
               color: '#111827',
-              padding: '8px 14px',
+padding: '12px 20px',
               boxSizing: 'border-box',
               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
               display: 'flex',
