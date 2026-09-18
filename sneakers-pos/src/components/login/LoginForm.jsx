@@ -45,15 +45,22 @@ export default function LoginForm() {
   const canOffline = hasOfflineSnapshot()
 
   return (
-  <main className="w-full md:w-1/2 lg:w-1/2 flex items-center justify-center
+    <main className="w-full md:w-1/2 lg:w-1/2 flex items-center justify-center
                      bg-white dark:bg-dark-bg min-h-screen px-6 py-10">
       <div className="w-full max-w-[440px]">
         <div className="flex justify-end mb-6">
           <ThemeToggle />
         </div>
 
-        <div className="md:hidden mb-10 flex justify-center">
-          <SneakersLogo variant="dark" />
+        {/* ⭐ Logo en móvil (el panel azul de escritorio no se ve aquí) */}
+        <div className="md:hidden mb-8 flex justify-center">
+          <img
+            src="/images/sneakers-tap-logo.png"
+            alt="Sneakers Tap"
+            className="w-48 h-auto object-contain
+                       drop-shadow-[0_10px_25px_rgba(0,0,0,0.15)]
+                       dark:drop-shadow-[0_10px_25px_rgba(0,0,0,0.4)]"
+          />
         </div>
 
         <header className="mb-8">
