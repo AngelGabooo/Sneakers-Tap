@@ -11,6 +11,7 @@ import { mapLocalIdToServerId } from '../../lib/idGenerator'
  *   - { ok: false, error }   → la operación falló, se reintenta
  */
 export const handlers = {
+
   // ---------------------------------------------------------------
   // PRODUCTOS
   // ---------------------------------------------------------------
@@ -49,27 +50,159 @@ export const handlers = {
       await mapLocalIdToServerId(product.id, createdProduct.id)
     }
 
+    // ⭐ FIX: Remapear cada variante local → UUID real
     if (Array.isArray(variants) && variants.length > 0) {
-      const variantsPayload = variants.map((v) => ({
-        product_id: createdProduct.id,
-        size: v.size || null,
-        color: v.color || null,
-        label: v.label || null,
-        sku: v.sku || null,
-        barcode: v.barcode || null,
-        stock: Number(v.stock) || 0,
-      }))
+      // Filtrar variantes que ya tienen UUID real (no necesitan remapeo)
+      const variantsToCreate = variants.filter((v) => !v.id || v.id.startsWith('local_'))
 
-      const { error: variantsError } = await supabase
-        .from('product_variants')
-        .insert(variantsPayload)
+      if (variantsToCreate.length > 0) {
+        const variantsPayload = variantsToCreate.map((v) => ({
+          product_id: createdProduct.id,
+          size: v.size || null,
+          color: v.color || null,
+          label: v.label || null,
+          sku: v.sku || null,
+          barcode: v.barcode || null,
+          stock: Number(v.stock) || 0,
+        }))
 
-      if (variantsError) {
-        console.warn('⚠️ Producto creado pero variantes fallaron:', variantsError)
+        const { data: createdVariants, error: variantsError } = await supabase
+          .from('product_variants')
+          .insert(variantsPayload)
+          .select()   // ⭐ CRÍTICO: devolver las filas creadas
+
+        if (variantsError) {
+          console.warn('⚠️ Producto creado pero variantes fallaron:', variantsError)
+        } else if (Array.isArray(createdVariants)) {
+          // ⭐ Guardar mapping de cada variante: local_var_xxx → UUID
+          for (let i = 0; i < createdVariants.length; i++) {
+            const localId = variantsToCreate[i]?.id
+            const serverId = createdVariants[i]?.id
+            if (localId?.startsWith('local_') && serverId) {
+              await mapLocalIdToServerId(localId, serverId)
+              console.log(`🔗 Variante mapeada: ${localId} → ${serverId}`)
+            }
+          }
+        }
       }
+
+      // ⭐ Variantes que YA tienen UUID real: no hacer nada, ya están creadas
     }
 
     return { ok: true, serverId: createdProduct.id }
+  },
+
+  [OP.UPDATE_PRODUCT]: async (payload) => {
+    const { id, patch, variants } = payload
+
+    const productPayload = {}
+    if (patch.name !== undefined)         productPayload.name = patch.name
+    if (patch.sku !== undefined)          productPayload.sku = patch.sku
+    if (patch.barcode !== undefined)      productPayload.barcode = patch.barcode
+    if (patch.description !== undefined)  productPayload.description = patch.description
+    if (patch.category !== undefined)     productPayload.category = patch.category
+    if (patch.brand !== undefined)        productPayload.brand = patch.brand
+    if (patch.salePrice !== undefined)    productPayload.sale_price = Number(patch.salePrice) || 0
+    if (patch.costPrice !== undefined)    productPayload.cost_price = Number(patch.costPrice) || 0
+    if (patch.minStock !== undefined)     productPayload.min_stock = Number(patch.minStock) || 3
+    if (patch.initialStock !== undefined) productPayload.initial_stock = Number(patch.initialStock) || 0
+    if (patch.images !== undefined)       productPayload.images = patch.images
+    if (patch.attributes !== undefined)   productPayload.attributes = patch.attributes
+    if (patch.status !== undefined)       productPayload.status = patch.status
+
+    if (Object.keys(productPayload).length > 0) {
+      const { error } = await supabase
+        .from('products')
+        .update(productPayload)
+        .eq('id', id)
+
+      if (error) return { ok: false, error: error.message }
+    }
+
+    // ⭐ FIX: Remapear variantes al actualizar
+    if (Array.isArray(variants)) {
+      // ⚠️ OJO: borrar TODAS las variantes y recrearlas rompe el mapping.
+      //        Mejor: actualizar las que existen, insertar las nuevas, borrar las eliminadas.
+      
+      // Obtener las variantes actuales en Supabase
+      const { data: existingVariants } = await supabase
+        .from('product_variants')
+        .select('id')
+        .eq('product_id', id)
+
+      const existingIds = new Set((existingVariants || []).map((v) => v.id))
+
+      // Separar en 3 grupos
+      const toUpdate = []
+      const toInsert = []
+      const incomingIds = new Set()
+
+      for (const v of variants) {
+        if (v.id && !v.id.startsWith('local_') && existingIds.has(v.id)) {
+          toUpdate.push(v)
+          incomingIds.add(v.id)
+        } else {
+          toInsert.push(v)
+        }
+      }
+
+      // ⚠️ Las que están en existingIds pero NO en incomingIds → borrar
+      const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
+
+      // 1. Borrar las que ya no están
+      if (toDelete.length > 0) {
+        await supabase.from('product_variants').delete().in('id', toDelete)
+      }
+
+      // 2. Actualizar las existentes
+      for (const v of toUpdate) {
+        await supabase
+          .from('product_variants')
+          .update({
+            size: v.size || null,
+            color: v.color || null,
+            label: v.label || null,
+            sku: v.sku || null,
+            barcode: v.barcode || null,
+            stock: Number(v.stock) || 0,
+          })
+          .eq('id', v.id)
+      }
+
+      // 3. Insertar las nuevas + guardar mapping
+      if (toInsert.length > 0) {
+        const insertPayload = toInsert.map((v) => ({
+          product_id: id,
+          size: v.size || null,
+          color: v.color || null,
+          label: v.label || null,
+          sku: v.sku || null,
+          barcode: v.barcode || null,
+          stock: Number(v.stock) || 0,
+        }))
+
+        const { data: createdVariants, error: insertErr } = await supabase
+          .from('product_variants')
+          .insert(insertPayload)
+          .select()
+
+        if (insertErr) {
+          console.warn('⚠️ Variantes nuevas fallaron:', insertErr)
+        } else if (Array.isArray(createdVariants)) {
+          // Guardar mapping local → UUID
+          for (let i = 0; i < createdVariants.length; i++) {
+            const localId = toInsert[i]?.id
+            const serverId = createdVariants[i]?.id
+            if (localId?.startsWith('local_') && serverId) {
+              await mapLocalIdToServerId(localId, serverId)
+              console.log(`🔗 Variante nueva mapeada: ${localId} → ${serverId}`)
+            }
+          }
+        }
+      }
+    }
+
+    return { ok: true }
   },
 
   [OP.UPDATE_PRODUCT]: async (payload) => {
