@@ -260,11 +260,12 @@ export const usersService = {
     if (error) throw error
     return true
   },
-
   /**
    * ⭐ Registra un inicio de sesión.
+   *    `startedOffline` = true cuando la sesión se creó estando sin internet
+   *    y se está sincronizando al volver la conexión.
    */
-  async startSession({ userId, device, userAgent, ip }) {
+  async startSession({ userId, device, userAgent, ip, startedOffline = false }) {
     const { data, error } = await supabase
       .from('user_sessions')
       .insert({
@@ -273,6 +274,7 @@ export const usersService = {
         user_agent: userAgent || null,
         ip: ip || null,
         started_at: new Date().toISOString(),
+        started_offline: startedOffline, // ⭐ NUEVO
       })
       .select()
       .single()

@@ -1,5 +1,6 @@
+// src/components/login/LoginForm.jsx
 import { useState } from 'react'
-import { Lock } from 'lucide-react'
+import { Lock, WifiOff } from 'lucide-react'
 import InputField from './InputField'
 import PasswordField from './PasswordField'
 import ErrorAlert from './ErrorAlert'
@@ -7,9 +8,10 @@ import SneakersLogo from './SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
 import Button from '../common/Button'
 import { useAuth } from '../../context/AuthContext'
+import { hasOfflineSnapshot } from '../../utils/offlineAuth'
 
 export default function LoginForm() {
-  const { login } = useAuth()
+  const { login, isOffline } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState({})
@@ -36,8 +38,11 @@ export default function LoginForm() {
     if (!result.ok) {
       setAuthError(result.error || 'Correo o contraseña incorrectos.')
     }
-    // Si ok, el AuthContext actualiza user y App redirige automáticamente.
+    // Si result.offline → el contexto ya seteó user.
   }
+
+  const showOfflineHint = isOffline || !navigator.onLine
+  const canOffline = hasOfflineSnapshot()
 
   return (
     <main className="w-full md:w-1/2 lg:w-1/2 flex items-center justify-center
@@ -59,6 +64,20 @@ export default function LoginForm() {
             Ingresa a tu cuenta para continuar
           </p>
         </header>
+
+        {/* ⭐ Banner modo offline */}
+        {showOfflineHint && (
+          <div className="mb-5 flex items-start gap-2.5 rounded-lg border px-3.5 py-3
+                          border-amber-200 bg-amber-50
+                          dark:border-amber-900/50 dark:bg-amber-950/40">
+            <WifiOff size={18} className="text-amber-600 shrink-0 mt-0.5" strokeWidth={2} />
+            <p className="text-sm text-amber-700 dark:text-amber-400 leading-snug">
+              {canOffline
+                ? 'Sin conexión. Puedes entrar con tus credenciales guardadas en este dispositivo.'
+                : 'Sin conexión. Necesitas conectarte al menos una vez para habilitar el acceso offline.'}
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-5" noValidate>
           <InputField

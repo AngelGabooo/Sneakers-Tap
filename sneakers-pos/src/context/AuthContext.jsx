@@ -11,6 +11,13 @@ import { authService } from '../services/authService'
 import { profilesService } from '../services/profilesService'
 import { usersService } from '../services/usersService'
 import { getPushStatus, subscribeToPush } from '../utils/webPush'
+// ⭐ NUEVO: helpers de acceso offline
+import {
+  saveOfflineSnapshot,
+  readOfflineSnapshot,
+  clearOfflineSnapshot,
+  validateOfflineLogin,
+} from '../utils/offlineAuth'
 
 const AuthContext = createContext(null)
 
@@ -62,7 +69,24 @@ function detectDevice(ua) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  // ⭐ NUEVO: estado de conexión para exponerlo a la UI
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  )
   const sessionIdRef = useRef(null)
+
+  // ⭐ NUEVO: escuchar cambios de red
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onOnline = () => setIsOffline(false)
+    const onOffline = () => setIsOffline(true)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [])
 
   /**
    * Carga el perfil completo del usuario autenticado.
@@ -102,8 +126,10 @@ export function AuthProvider({ children }) {
   /**
    * ⭐ Registra una nueva sesión en Supabase.
    *    Guarda el sessionId para poder cerrarla en logout.
+   *    `startedOffline` = true cuando la sesión se creó sin internet
+   *    y se está sincronizando al volver la conexión.
    */
-  const startSession = useCallback(async (userId) => {
+  const startSession = useCallback(async (userId, { startedOffline = false } = {}) => {
     try {
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : null
       const device = detectDevice(ua)
@@ -113,12 +139,18 @@ export function AuthProvider({ children }) {
         device,
         userAgent: ua,
         ip: null, // no lo tenemos desde el cliente
+        startedOffline, // ⭐ NUEVO
       })
 
       if (session?.id) {
         sessionIdRef.current = session.id
         try { sessionStorage.setItem(SESSION_KEY, session.id) } catch {}
-        console.log('🟢 Sesión registrada:', session.id, '·', device)
+        console.log(
+          startedOffline ? '🟡 Sesión offline sincronizada:' : '🟢 Sesión registrada:',
+          session.id,
+          '·',
+          device
+        )
       }
     } catch (err) {
       console.warn('⚠️ No se pudo registrar la sesión:', err.message)
@@ -146,11 +178,34 @@ export function AuthProvider({ children }) {
   }, [])
 
   /**
+   * ⭐ NUEVO: Login OFFLINE.
+   *    Valida credenciales contra el snapshot guardado en el dispositivo.
+   *    Se declara ANTES de `login` para que esté disponible cuando
+   *    `login` la invoque.
+   */
+  const offlineLogin = useCallback(async ({ email, password }) => {
+    const res = await validateOfflineLogin(email, password)
+    if (!res.ok) return res
+
+    // Cargamos el user guardado como sesión activa.
+    setUser(res.user)
+    // No creamos sesión en Supabase (no hay red).
+    // Cuando vuelva la conexión, se puede registrar en background.
+    return { ok: true, offline: true }
+  }, [])
+
+  /**
    * Login.
    */
   const login = useCallback(async ({ email, password }) => {
     if (!email || !password) {
       return { ok: false, error: 'Correo y contraseña son obligatorios.' }
+    }
+
+    // ⭐ NUEVO: si estamos offline, ir directo al login offline.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      console.log('🟡 Sin conexión: intentando login offline')
+      return offlineLogin({ email, password })
     }
 
     try {
@@ -163,6 +218,14 @@ export function AuthProvider({ children }) {
         return { ok: false, error: result.error }
       }
 
+      // ⭐ NUEVO: guardar snapshot para futuros accesos offline.
+      //    Se guarda DESPUÉS de loadProfile exitoso, con el user mapeado.
+      try {
+        await saveOfflineSnapshot(result.user, password)
+      } catch (snapErr) {
+        console.warn('⚠️ No se pudo guardar snapshot offline:', snapErr.message)
+      }
+
       // ⭐ NUEVO: registrar sesión
       await startSession(authUser.id)
 
@@ -171,9 +234,19 @@ export function AuthProvider({ children }) {
 
       return { ok: true }
     } catch (err) {
+      // ⭐ NUEVO: si el error es de red (no de credenciales),
+      //    intentar login offline con el snapshot guardado.
+      const msg = err?.message || ''
+      const isNetworkError = /network|fetch|failed to fetch|load failed|networkerror/i.test(msg)
+
+      if (isNetworkError) {
+        console.warn('⚠️ Error de red en login, intentando offline:', msg)
+        return offlineLogin({ email, password })
+      }
+
       return { ok: false, error: err.message || 'Error al iniciar sesión.' }
     }
-  }, [loadProfile, startSession])
+  }, [loadProfile, startSession, offlineLogin])
 
   /**
    * Logout.
@@ -186,6 +259,9 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.warn('Error al cerrar sesión:', err)
     }
+    // ⭐ NUEVO: al hacer logout explícito, limpiar snapshot offline.
+    //    El usuario quiere salir del dispositivo.
+    clearOfflineSnapshot()
     setUser(null)
   }, [endSession])
 
@@ -193,6 +269,8 @@ export function AuthProvider({ children }) {
    * Refrescar perfil manualmente.
    */
   const refreshUser = useCallback(async () => {
+    // ⭐ NUEVO: sin red no podemos refrescar contra Supabase.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return
     const authUser = await authService.getUser()
     if (authUser) await loadProfile(authUser)
   }, [loadProfile])
@@ -205,7 +283,15 @@ export function AuthProvider({ children }) {
 
     async function init() {
       try {
-        const session = await authService.getSession()
+        // ⭐ NUEVO: envolvemos getSession en try/catch para que un fallo
+        //    de red no rompa la inicialización. Si falla, caemos al snapshot.
+        let session = null
+        try {
+          session = await authService.getSession()
+        } catch (netErr) {
+          console.warn('⚠️ getSession falló (probablemente offline):', netErr.message)
+        }
+
         if (!mounted) return
 
         if (session?.user) {
@@ -224,11 +310,25 @@ export function AuthProvider({ children }) {
             await startSession(session.user.id)
           }
         } else {
-          setUser(null)
+          // ⭐ NUEVO: sin sesión de Supabase → probar snapshot offline.
+          const snap = readOfflineSnapshot()
+          if (snap?.user) {
+            console.log('🟡 Entrando con snapshot offline de', snap.user.email)
+            setUser(snap.user)
+          } else {
+            setUser(null)
+          }
         }
       } catch (err) {
         console.error('❌ Error inicializando auth:', err)
-        setUser(null)
+        // ⭐ NUEVO: último intento, usar snapshot offline si existe.
+        const snap = readOfflineSnapshot()
+        if (snap?.user) {
+          console.log('🟡 Recuperando sesión offline tras error')
+          setUser(snap.user)
+        } else {
+          setUser(null)
+        }
       } finally {
         if (mounted) setLoading(false)
       }
@@ -258,6 +358,38 @@ export function AuthProvider({ children }) {
       subscription?.unsubscribe()
     }
   }, [loadProfile, startSession, endSession])
+
+  /**
+   * ⭐ NUEVO: cuando vuelve la red, si teníamos una sesión local
+   *    que no se registró en Supabase (porque entramos offline),
+   *    la registramos ahora. También refrescamos el perfil.
+   */
+  useEffect(() => {
+    if (isOffline) return          // aún sin red, no hacer nada
+    if (!user?.id) return          // sin usuario, no hacer nada
+    if (sessionIdRef.current) return // ya hay sesión registrada, no duplicar
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        console.log('🟡 Red recuperada: sincronizando sesión offline…')
+        await startSession(user.id, { startedOffline: true })
+        if (cancelled) return
+
+        // Refrescar perfil para traer roles/permisos actualizados
+        const authUser = await authService.getUser()
+        if (authUser) {
+          await loadProfile(authUser)
+          // Actualizar last_access también
+          profilesService.touchLastAccess(authUser.id).catch(() => {})
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo re-sincronizar sesión offline:', err.message)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [isOffline, user?.id, startSession, loadProfile])
 
   /**
    * ⭐ Al cerrar/recargar la pestaña, marcar la sesión como cerrada.
@@ -305,6 +437,8 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!user?.id) return
     if (typeof window === 'undefined') return
+    // ⭐ NUEVO: no intentar push si no hay red.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return
     if (!('Notification' in window)) return
     if (!('serviceWorker' in navigator)) return
 
@@ -330,6 +464,7 @@ export function AuthProvider({ children }) {
       value={{
         user,
         loading,
+        isOffline,          // ⭐ NUEVO: exponer estado de conexión
         isAuthenticated: !!user,
         login,
         logout,
