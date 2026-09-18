@@ -44,6 +44,10 @@ function mapFromSupabase(row) {
     priceList: row.price_list,
     defaultDiscount: Number(row.default_discount) || 0,
     maxDiscount: Number(row.max_discount) || 0,
+    // ⭐ NUEVO: escalones
+    discountTiers: Array.isArray(row.discount_tiers)
+      ? row.discount_tiers
+      : [],
     minPurchaseAmount: Number(row.min_purchase_amount) || 0,
     minPurchaseUnits: Number(row.min_purchase_units) || 0,
 
@@ -66,6 +70,71 @@ function mapFromSupabase(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     syncStatus: 'synced',
+  }
+}
+
+/**
+ * ⭐ Convierte un objeto de la app → row para Supabase (snake_case).
+ *    Útil para guardar en IndexedDB con el mismo formato que Supabase,
+ *    y para el syncQueue cuando estamos offline.
+ */
+function mapToSupabase(payload) {
+  if (!payload) return null
+  return {
+    code: payload.code || null,
+    name: payload.name,
+    legal_name: payload.legalName || null,
+    rfc: payload.rfc || null,
+    client_type: payload.clientType || 'person',
+
+    contact_name: payload.contactName || null,
+    phone: payload.phone || null,
+    phone_secondary: payload.phoneSecondary || null,
+    email: payload.email || null,
+    website: payload.website || null,
+
+    tax_regime: payload.taxRegime || null,
+    cfdi_use: payload.cfdiUse || null,
+    billing_email: payload.billingEmail || null,
+
+    street: payload.street || null,
+    ext_number: payload.extNumber || null,
+    int_number: payload.intNumber || null,
+    neighborhood: payload.neighborhood || null,
+    zip: payload.zip || null,
+    city: payload.city || null,
+    state: payload.state || null,
+    country: payload.country || null,
+
+    condition: payload.condition || 'basic',
+    price_list: payload.priceList || 'public',
+    default_discount: Number(payload.defaultDiscount) || 0,
+    max_discount: Number(payload.maxDiscount) || 0,
+    // ⭐ NUEVO
+    discount_tiers: Array.isArray(payload.discountTiers)
+      ? payload.discountTiers.map((t) => ({
+          minQty: Number(t?.minQty) || 0,
+          discount: Number(t?.discount) || 0,
+        }))
+      : [],
+    min_purchase_amount: Number(payload.minPurchaseAmount) || 0,
+    min_purchase_units: Number(payload.minPurchaseUnits) || 0,
+
+    credit_enabled: !!payload.creditEnabled,
+    credit_limit: Number(payload.creditLimit) || 0,
+    credit_used: Number(payload.creditUsed) || 0,
+    credit_days: Number(payload.creditDays) || 0,
+
+    payment_condition: payload.paymentCondition || 'immediate',
+    payment_methods: payload.paymentMethods || [],
+
+    responsable: payload.responsable || null,
+    branch: payload.branch || null,
+
+    status: payload.status || 'active',
+    overdue: !!payload.overdue,
+
+    internal_notes: payload.internalNotes || null,
   }
 }
 
@@ -123,11 +192,13 @@ export const wholesaleRepo = {
       console.warn('⚠️ Guardando mayorista en cola (offline):', err.message)
 
       const id = `local_may_${Date.now()}`
+      // ⭐ Guardar en formato Supabase (snake_case) para consistencia
+      const supabaseShape = mapToSupabase(payload)
       const local = {
-        ...payload,
+        ...supabaseShape,
         id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }
 
       const db = await dbPromise
@@ -155,13 +226,21 @@ export const wholesaleRepo = {
 
       const db = await dbPromise
       const current = await db.get(STORES.WHOLESALE, id)
-      const merged = { ...current, ...patch, updatedAt: new Date().toISOString() }
+
+      // ⭐ Convertir el patch a snake_case antes de mergear
+      const patchSupabase = mapToSupabase({ ...current, ...patch })
+      const merged = {
+        ...current,
+        ...patchSupabase,
+        updated_at: new Date().toISOString(),
+      }
       await db.put(STORES.WHOLESALE, merged)
 
+      // ⭐ Enviar patch también en snake_case al syncQueue
       await syncQueue.add({
         type: OP.UPDATE_CUSTOMER,
         entity: 'wholesale_customers',
-        payload: { id, patch },
+        payload: { id, patch: patchSupabase },
         priority: PRIORITY.NORMAL,
       })
 

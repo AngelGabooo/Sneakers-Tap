@@ -1,9 +1,5 @@
 // src/services/sync/operationTypes.js
 
-/**
- * Tipos de operaciones que se pueden encolar para sincronizar.
- */
-
 export const OP = {
   // Ventas
   CREATE_SALE:      'CREATE_SALE',
@@ -31,25 +27,26 @@ export const OP = {
   // Usuarios / Roles
   UPDATE_PROFILE:   'UPDATE_PROFILE',
   CREATE_USER:      'CREATE_USER',
-  UPDATE_SETTINGS: 'UPDATE_SETTINGS',
+  UPDATE_SETTINGS:  'UPDATE_SETTINGS',
 
   CREATE_AUDIT_LOG: 'CREATE_AUDIT_LOG',
+
+  // ⭐ NUEVOS: Créditos
+  CREATE_CREDIT:         'CREATE_CREDIT',         // Otorgar crédito
+  UPDATE_CREDIT:         'UPDATE_CREDIT',         // Actualizar estado/monto
+  CREATE_CREDIT_PAYMENT: 'CREATE_CREDIT_PAYMENT', // Registrar pago
+  CREATE_CREDIT_CHARGE:   'CREATE_CREDIT_CHARGE',   // ⭐ NUEVO
+
 }
 
-/**
- * Estados de una operación en la cola.
- */
 export const STATUS = {
-  PENDING:   'pending',    // Aún no se intentó sincronizar
-  SYNCING:   'syncing',    // En proceso
-  SYNCED:    'synced',     // Sincronizada con éxito (se puede borrar)
-  FAILED:    'failed',     // Falló, esperando reintento
-  CONFLICT:  'conflict',   // Conflicto detectado, requiere atención
+  PENDING:   'pending',
+  SYNCING:   'syncing',
+  SYNCED:    'synced',
+  FAILED:    'failed',
+  CONFLICT:  'conflict',
 }
 
-/**
- * Prioridades (mayor número = se procesa antes).
- */
 export const PRIORITY = {
   LOW:     1,
   NORMAL:  5,

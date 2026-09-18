@@ -1,7 +1,7 @@
 // src/components/audit/AuditStats.jsx
 import { useMemo } from 'react'
 
-export default function AuditStats({ events }) {
+export default function AuditStats({ events = [] }) {          // ⭐ default = []
   const stats = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -11,7 +11,11 @@ export default function AuditStats({ events }) {
     let importantCount = 0
     const byModule = {}
 
-    events.forEach((ev) => {
+    // ⭐ Guard defensivo por si llega algo raro
+    const list = Array.isArray(events) ? events : []
+
+    list.forEach((ev) => {
+      if (!ev) return
       const d = new Date(ev.createdAt)
       if (d >= today) todayCount++
       if (ev.level === 'critical') criticalCount++
@@ -50,7 +54,7 @@ export default function AuditStats({ events }) {
       <StatCard
         icon="📦"
         label="Total"
-        value={events.length}
+        value={Array.isArray(events) ? events.length : 0}
         color="gray"
       />
     </div>

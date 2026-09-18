@@ -1,3 +1,4 @@
+// src/pages/WholesaleNew.jsx
 import { useEffect, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Toast from '../components/common/Toast'
@@ -33,6 +34,11 @@ const INITIAL_FORM = {
   priceList: 'basic',
   defaultDiscount: '',
   maxDiscount: '',
+  // ⭐ NUEVO: escalones por defecto (admin los puede editar)
+  discountTiers: [
+    { minQty: 4, discount: 5 },
+    { minQty: 8, discount: 10 },
+  ],
   minPurchaseAmount: '',
   minPurchaseUnits: '',
   creditEnabled: false,
@@ -84,6 +90,24 @@ export default function WholesaleNew() {
     if (form.defaultDiscount && form.maxDiscount) {
       if (Number(form.defaultDiscount) > Number(form.maxDiscount)) {
         e.defaultDiscount = 'El descuento predeterminado no puede superar el máximo.'
+      }
+    }
+
+    // ⭐ Validar escalones
+    const tiers = Array.isArray(form.discountTiers) ? form.discountTiers : []
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i]
+      if (!(Number(t.minQty) > 0)) {
+        e.discountTiers = `El escalón #${i + 1} necesita una cantidad válida.`
+        break
+      }
+      if (!(Number(t.discount) >= 0)) {
+        e.discountTiers = `El escalón #${i + 1} necesita un % válido.`
+        break
+      }
+      if (i > 0 && Number(tiers[i].minQty) <= Number(tiers[i - 1].minQty)) {
+        e.discountTiers = 'Los escalones deben ir de menor a mayor cantidad.'
+        break
       }
     }
 

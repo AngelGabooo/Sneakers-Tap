@@ -7,7 +7,7 @@
 export const VIEW_PERMISSIONS = {
   // Principal
   dashboard:              'dashboard.view',
-  profile:                'profile.view',        // 👈 NUEVO
+  profile:                'profile.view',
   pos:                    'pos.access',
   'sales-history':        'sales.view',
   'sale-detail':          'sales.view_detail',
@@ -39,10 +39,13 @@ export const VIEW_PERMISSIONS = {
   'wholesale-new':        'wholesale.create',
   'wholesale-edit':       'wholesale.edit',
 
+  // ⭐ NUEVO: Créditos
+  credits:                'credits.view',
+
   // Administración
   users:                  'users.view',
   'user-new':             'users.create',
-  'user-edit':            'users.edit',          // 👈 NUEVO
+  'user-edit':            'users.edit',
   'user-activity':        'users.view',
   'user-sessions':        'users.view',
   roles:                  'roles.view',
@@ -64,10 +67,9 @@ export const SUPER_PERMISSION = 'settings.system'
 
 /**
  * Vistas que nunca requieren permiso.
- * El perfil propio siempre es accesible para el usuario logueado.
  */
 export const PUBLIC_VIEWS = new Set([
-  'profile',   // 👈 NUEVO — todos los usuarios pueden ver su propio perfil
+  'profile',
 ])
 
 /**
@@ -79,6 +81,7 @@ export const FALLBACK_VIEW_ORDER = [
   'pos',
   'cash-current',
   'sales-history',
+  'credits',       // ⭐ NUEVO
   'dashboard',
   'products',
   'inventory',

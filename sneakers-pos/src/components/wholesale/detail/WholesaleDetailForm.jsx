@@ -1,8 +1,10 @@
+// src/components/wholesale/detail/WholesaleDetailForm.jsx
 import Card from '../../common/Card'
 import TextField from '../../common/TextField'
 import SelectField from '../../common/SelectField'
 import TextareaField from '../../common/TextareaField'
 import Checkbox from '../../common/Checkbox'
+import WholesaleCreditSection from './WholesaleCreditSection'   // ⭐ NUEVO
 
 const CONDITION_OPTIONS = [
   { value: 'basic',       label: 'Mayoreo Básico' },
@@ -41,7 +43,7 @@ const PAYMENT_CONDITION = [
   { value: 'custom',    label: 'Personalizado' },
 ]
 
-export default function WholesaleDetailForm({ form, errors, onChange }) {
+export default function WholesaleDetailForm({ form, errors, onChange, creditSectionProps }) {
   return (
     <div className="space-y-5">
       {/* Información general */}
@@ -316,10 +318,11 @@ export default function WholesaleDetailForm({ form, errors, onChange }) {
             options={PRICE_LIST_OPTIONS}
           />
 
+          {/* ⭐ Descuentos por volumen */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <TextField
               id="defaultDiscount"
-              label="Descuento predeterminado (%)"
+              label="Descuento base (%) — 0-3 pares"
               type="number"
               min={0}
               max={100}
@@ -329,14 +332,99 @@ export default function WholesaleDetailForm({ form, errors, onChange }) {
             />
             <TextField
               id="maxDiscount"
-              label="Descuento máximo (%)"
+              label="Descuento máximo (%) — tope"
               type="number"
               min={0}
               max={100}
               value={form.maxDiscount}
               onChange={(e) => onChange('maxDiscount', e.target.value)}
               error={errors.maxDiscount}
+              helper="0 = sin tope. El sistema nunca aplicará más que este %."
             />
+          </div>
+
+          {/* ⭐ Escalones por cantidad de pares */}
+          <div className="p-3 rounded-lg bg-blue-50/40 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="text-base">🎉</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-brand-black dark:text-dark-text">
+                  Descuentos por volumen
+                </p>
+                <p className="text-[11px] text-gray-600 dark:text-dark-muted mt-0.5">
+                  Agrega escalones: cuando el carrito tenga X pares o más, se aplicará el % indicado a
+                  TODOS los productos. Si no se cumple ningún escalón, se usa el descuento base.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {(form.discountTiers || []).map((tier, idx) => (
+                <div key={idx} className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <TextField
+                      id={`tier-qty-${idx}`}
+                      label={idx === 0 ? 'Desde (pares)' : ''}
+                      type="number"
+                      min={1}
+                      value={tier.minQty ?? ''}
+                      onChange={(e) => {
+                        const next = [...(form.discountTiers || [])]
+                        next[idx] = { ...next[idx], minQty: e.target.value }
+                        onChange('discountTiers', next)
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <TextField
+                      id={`tier-pct-${idx}`}
+                      label={idx === 0 ? 'Descuento (%)' : ''}
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={tier.discount ?? ''}
+                      onChange={(e) => {
+                        const next = [...(form.discountTiers || [])]
+                        next[idx] = { ...next[idx], discount: e.target.value }
+                        onChange('discountTiers', next)
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = (form.discountTiers || []).filter((_, i) => i !== idx)
+                      onChange('discountTiers', next)
+                    }}
+                    className="h-10 px-2 text-brand-red hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors text-xs font-medium"
+                    title="Eliminar escalón"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const next = [...(form.discountTiers || [])]
+                  const last = next[next.length - 1]
+                  next.push({
+                    minQty: last ? Number(last.minQty) + 4 : 4,
+                    discount: last ? Number(last.discount) + 5 : 5,
+                  })
+                  onChange('discountTiers', next)
+                }}
+                className="
+                  inline-flex items-center gap-1.5 h-8 px-3 rounded-md
+                  text-[11px] font-semibold
+                  text-brand-blue hover:bg-blue-50 dark:hover:bg-blue-950/40
+                  transition-colors
+                "
+              >
+                + Agregar escalón
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -419,6 +507,17 @@ export default function WholesaleDetailForm({ form, errors, onChange }) {
                   disabled
                 />
               </div>
+
+              {/* ⭐ NUEVO: Sección de crédito activo + otorgar */}
+              {creditSectionProps && (
+                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-dark-border">
+                  <WholesaleCreditSection
+                    credit={creditSectionProps.activeCredit}
+                    onGrant={creditSectionProps.onGrant}
+                    onViewDetail={creditSectionProps.onViewDetail}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>

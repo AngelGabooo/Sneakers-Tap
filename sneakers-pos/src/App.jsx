@@ -27,6 +27,7 @@ import CashHistory from './pages/CashHistory'
 import Wholesale from './pages/Wholesale'
 import WholesaleDetail from './pages/WholesaleDetail'
 import WholesaleNew from './pages/WholesaleNew'
+import Credits from './pages/Credits'          // ⭐ NUEVO
 import Users from './pages/Users'
 import UserCreate from './pages/UserCreate'
 import UserEdit from './pages/UserEdit'
@@ -60,6 +61,7 @@ const VIEWS = {
   wholesale:              Wholesale,
   'wholesale-new':        WholesaleNew,
   'wholesale-edit':       WholesaleDetail,
+  credits:                Credits,              // ⭐ NUEVO
   users:                  Users,
   'user-new':             UserCreate,
   'user-edit':            UserEdit,
@@ -79,7 +81,6 @@ export default function App() {
   const { activeView } = useView()
   const { canView } = usePermissions()
 
-  // Pantalla de carga mientras se verifica la sesión con Supabase
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-surface dark:bg-dark-bg">
@@ -91,7 +92,6 @@ export default function App() {
     )
   }
 
-  // No autenticado → Login + banner offline
   if (!isAuthenticated) {
     return (
       <>
@@ -101,7 +101,6 @@ export default function App() {
     )
   }
 
-  // Vista no existe → buscar fallback permitido
   if (!VIEWS[activeView]) {
     const fallback = FALLBACK_VIEW_ORDER.find((v) => canView(v))
     if (fallback && VIEWS[fallback]) {
@@ -121,7 +120,6 @@ export default function App() {
     )
   }
 
-  // Vista existe pero no tengo permiso → sin acceso
   if (!canView(activeView)) {
     return (
       <>
@@ -131,7 +129,6 @@ export default function App() {
     )
   }
 
-  // Vista normal
   const CurrentView = VIEWS[activeView]
   return (
     <>

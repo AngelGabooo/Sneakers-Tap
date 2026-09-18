@@ -25,7 +25,6 @@ function extractImageUrl(images) {
   if (typeof images === 'string') return images
   if (!Array.isArray(images) || images.length === 0) return null
 
-  // Preferir la marcada como primary
   const primary = images.find((img) => img?.isPrimary)
   const first = primary || images[0]
 
@@ -34,6 +33,59 @@ function extractImageUrl(images) {
     return first.url || first.publicUrl || null
   }
   return null
+}
+
+/**
+ * ⭐ Calcula el descuento por volumen según el total de pares en el carrito.
+ *
+ * Reglas:
+ *   1. Se toma `defaultDiscount` como base (0-3 pares).
+ *   2. Se aplica el tier más alto cuyo `minQty <= totalPares`.
+ *   3. El resultado se cappe a `maxDiscount` si está definido (>0).
+ *
+ * @param {number} totalPares - Suma de quantity de todos los items
+ * @param {object} customer   - Cliente mayorista
+ * @returns {{ discount: number, tier: object|null, nextTier: object|null }}
+ */
+function computeVolumeDiscount(totalPares, customer) {
+  if (!customer?.isWholesale) {
+    return { discount: 0, tier: null, nextTier: null }
+  }
+
+  const baseDiscount = Number(customer.defaultDiscount) || 0
+  const maxDiscount = Number(customer.maxDiscount) || 0
+  const tiers = Array.isArray(customer.discountTiers) ? customer.discountTiers : []
+
+  // Ordenar tiers por minQty ascendente
+  const sortedTiers = [...tiers]
+    .filter((t) => Number(t.minQty) > 0 && Number(t.discount) > 0)
+    .sort((a, b) => Number(a.minQty) - Number(b.minQty))
+
+  // Tier aplicable: el más alto cuyo minQty <= totalPares
+  let appliedTier = null
+  for (const tier of sortedTiers) {
+    if (totalPares >= Number(tier.minQty)) {
+      appliedTier = tier
+    } else {
+      break
+    }
+  }
+
+  // Siguiente tier alcanzable (para hint de UX)
+  const nextTier = sortedTiers.find((t) => totalPares < Number(t.minQty)) || null
+
+  // El descuento base vs el del tier: se toma el MAYOR
+  let discount = baseDiscount
+  if (appliedTier && Number(appliedTier.discount) > discount) {
+    discount = Number(appliedTier.discount)
+  }
+
+  // Capar al máximo si está definido
+  if (maxDiscount > 0 && discount > maxDiscount) {
+    discount = maxDiscount
+  }
+
+  return { discount, tier: appliedTier, nextTier }
 }
 
 export function CartProvider({ children }) {
@@ -77,11 +129,24 @@ export function CartProvider({ children }) {
     writeSessionJSON(key, { items, customer, manualDiscount, note })
   }, [userId, items, customer, manualDiscount, note])
 
+  // ⭐ Total de pares en el carrito
+  const totalPares = useMemo(
+    () => items.reduce((acc, i) => acc + (Number(i.quantity) || 0), 0),
+    [items],
+  )
+
+  // ⭐ Descuento por volumen calculado
+  const volumeDiscount = useMemo(
+    () => computeVolumeDiscount(totalPares, customer),
+    [totalPares, customer],
+  )
+
+  // ⭐ Factor de precio aplicado a TODOS los items
   const priceFactor = useMemo(() => {
     if (!customer?.isWholesale) return 1
-    const d = Number(customer.defaultDiscount) || 0
+    const d = volumeDiscount.discount
     return Math.max(0, 1 - d / 100)
-  }, [customer])
+  }, [customer, volumeDiscount.discount])
 
   const addItem = useCallback(
     (product, variant, quantity = 1) => {
@@ -91,15 +156,7 @@ export function CartProvider({ children }) {
       const variantLabel = variant?.label || '—'
       const sku = variant?.sku || product.sku || ''
       const stock = variant ? Number(variant.stock) || 0 : Number(product.initialStock) || 0
-
-      // ⭐ Extraer imagen de forma robusta
       const imageUrl = extractImageUrl(product.images)
-
-      console.log('🖼️ addItem imagen:', {
-        productName: product.name,
-        images: product.images,
-        imageUrl,
-      })
 
       setItems((list) => {
         const existing = list.find((i) => i.key === key)
@@ -130,7 +187,7 @@ export function CartProvider({ children }) {
     [priceFactor],
   )
 
-  // Recalcular precios cuando cambia el cliente
+  // ⭐ Recalcular precios cuando cambia el factor (por cambio de cliente o volumen)
   useEffect(() => {
     setItems((list) =>
       list.map((i) => ({ ...i, price: (i.basePrice || 0) * priceFactor })),
@@ -162,6 +219,7 @@ export function CartProvider({ children }) {
     }
   }, [userId])
 
+  // ⭐ Totales considerando descuento por volumen + manual
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, i) => acc + (i.basePrice || 0) * i.quantity, 0)
     const discounted = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
@@ -170,9 +228,10 @@ export function CartProvider({ children }) {
 
     let extraDiscount = 0
     if (manualDiscount?.scope === 'cart') {
-      extraDiscount = manualDiscount.type === 'percent'
-        ? (discounted * Number(manualDiscount.value)) / 100
-        : Number(manualDiscount.value) || 0
+      extraDiscount =
+        manualDiscount.type === 'percent'
+          ? (discounted * Number(manualDiscount.value)) / 100
+          : Number(manualDiscount.value) || 0
     }
 
     const total = Math.max(0, discounted - extraDiscount)
@@ -194,6 +253,9 @@ export function CartProvider({ children }) {
     discount: manualDiscount,
     note,
     totals,
+    // ⭐ Exponer datos del volumen
+    totalPares,
+    volumeDiscount,
     addItem,
     updateQuantity,
     removeItem,

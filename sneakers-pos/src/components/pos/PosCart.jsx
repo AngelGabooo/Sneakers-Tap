@@ -1,3 +1,4 @@
+// src/components/pos/PosCart.jsx
 import { ShoppingCart, UserPlus, User, Percent, StickyNote, Trash2, Save, X } from 'lucide-react'
 import Button from '../common/Button'
 import Card from '../common/Card'
@@ -9,6 +10,9 @@ export default function PosCart({
   items = [],
   totals,
   customer,
+  // ⭐ Nuevas props
+  totalPares = 0,
+  volumeDiscount = null,
   onQuantityChange,
   onRemove,
   onClear,
@@ -81,13 +85,13 @@ export default function PosCart({
                 </p>
                 {customer.isWholesale && (
                   <Badge variant="info">
-                    Mayorista · {customer.defaultDiscount ? `${customer.defaultDiscount}%` : 'sin dto.'}
+                    Mayorista · {volumeDiscount?.discount > 0 ? `${volumeDiscount.discount}%` : 'sin dto.'}
                   </Badge>
                 )}
               </div>
               {customer.isWholesale && customer.minPurchaseAmount > 0 && (
                 <p className="text-[10px] text-gray-500 dark:text-dark-muted">
-                  Compra mínima: ${customer.minPurchaseAmount.toLocaleString('es-MX')}
+                  Compra mínima: ${Number(customer.minPurchaseAmount).toLocaleString('es-MX')}
                 </p>
               )}
             </div>
@@ -102,6 +106,11 @@ export default function PosCart({
           </>
         )}
       </button>
+
+      {/* ⭐ Hint de descuento por volumen */}
+      {customer?.isWholesale && hasItems && (
+        <VolumeDiscountHint volumeDiscount={volumeDiscount} totalPares={totalPares} />
+      )}
 
       {/* Lista de items */}
       <div className="flex-1 overflow-y-auto px-4 divide-y divide-gray-100 dark:divide-dark-border min-h-0">
@@ -152,7 +161,7 @@ export default function PosCart({
 
               {totals.wholesaleDiscountAmount > 0 && (
                 <Row
-                  label={`Descuento ${customer?.isWholesale ? 'mayorista' : ''}`}
+                  label={`Descuento ${customer?.isWholesale ? 'mayorista' : ''}${volumeDiscount?.tier ? ` (${volumeDiscount.discount}%)` : ''}`}
                   value={-totals.wholesaleDiscountAmount}
                   tone="info"
                 />
@@ -187,6 +196,59 @@ export default function PosCart({
       )}
     </Card>
   )
+}
+
+/**
+ * ⭐ Hint de descuento por volumen
+ */
+function VolumeDiscountHint({ volumeDiscount, totalPares }) {
+  if (!volumeDiscount) return null
+
+  const { discount, tier, nextTier } = volumeDiscount
+
+  // Sin escalones definidos → no mostrar nada
+  if (!tier && !nextTier) return null
+
+  // Aplicado un tier actual y hay un siguiente alcanzable
+  if (tier && nextTier) {
+    const faltan = Number(nextTier.minQty) - totalPares
+    return (
+      <div className="px-4 py-2 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/40">
+        <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+          🎉 {discount}% aplicado por llevar {totalPares} pares
+        </p>
+        <p className="text-[10px] text-gray-600 dark:text-dark-muted mt-0.5">
+          Agrega {faltan} {faltan === 1 ? 'par' : 'pares'} más para {nextTier.discount}% de descuento
+        </p>
+      </div>
+    )
+  }
+
+  // Aplicado el tier máximo (sin siguiente)
+  if (tier && !nextTier) {
+    return (
+      <div className="px-4 py-2 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/40">
+        <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+          🎉 {discount}% aplicado por llevar {totalPares} pares
+        </p>
+      </div>
+    )
+  }
+
+  // Sin tier aplicado pero hay uno alcanzable
+  if (!tier && nextTier) {
+    const faltan = Number(nextTier.minQty) - totalPares
+    if (faltan <= 0) return null
+    return (
+      <div className="px-4 py-2 bg-blue-50/60 dark:bg-blue-950/20 border-b border-blue-100 dark:border-blue-900/40">
+        <p className="text-[11px] text-brand-blue font-medium">
+          💡 Agrega {faltan} {faltan === 1 ? 'par' : 'pares'} más para {nextTier.discount}% de descuento
+        </p>
+      </div>
+    )
+  }
+
+  return null
 }
 
 function Row({ label, value, tone = 'neutral' }) {

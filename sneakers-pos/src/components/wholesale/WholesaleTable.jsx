@@ -1,3 +1,4 @@
+// src/components/wholesale/WholesaleTable.jsx
 import { ArrowUp, ArrowDown, Users, Search } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -35,7 +36,8 @@ export default function WholesaleTable({
   wholesales = [], loading = false,
   selectedIds = [], onToggleSelect, onToggleSelectAll,
   sort, onSortChange,
-  onView, onEdit, onNewSale, onViewSales, onViewAccount, onViewAudit, onToggleStatus, onBlock,
+  onView, onEdit, onNewSale, onViewSales, onViewAccount, onViewAudit,
+  onToggleStatus, onBlock, onDelete,                     // ⭐ NUEVO: onDelete
   searchQuery = '', filtersActive = false, onClearAll,
   page, perPage, total, onPageChange, onPerPageChange,
   onGoToNew,
@@ -162,7 +164,7 @@ export default function WholesaleTable({
                           </div>
                           <div className="min-w-0">
                             <button
-                              onClick={() => onView?.(w)}
+                              onClick={() => onEdit?.(w)}
                               className="text-sm font-medium text-brand-black dark:text-dark-text hover:text-brand-blue truncate block text-left transition-colors"
                             >
                               {w.name}
@@ -186,7 +188,7 @@ export default function WholesaleTable({
 
                       {/* Condición */}
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <button onClick={() => onView?.(w)}>
+                        <button onClick={() => onEdit?.(w)}>
                           <Badge variant={condition.variant}>{condition.label}</Badge>
                         </button>
                       </td>
@@ -268,14 +270,10 @@ export default function WholesaleTable({
                       <td className="px-4 py-3">
                         <WholesaleRowActions
                           wholesale={w}
-                          onView={onView}
                           onEdit={onEdit}
-                          onNewSale={onNewSale}
-                          onViewSales={onViewSales}
-                          onViewAccount={onViewAccount}
-                          onViewAudit={onViewAudit}
                           onToggleStatus={onToggleStatus}
                           onBlock={onBlock}
+                          onDelete={onDelete}         // ⭐ NUEVO
                         />
                       </td>
                     </tr>

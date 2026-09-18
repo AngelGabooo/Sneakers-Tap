@@ -473,14 +473,28 @@ export const handlers = {
   // ---------------------------------------------------------------
   [OP.CREATE_CUSTOMER]: async (payload) => {
     const { customer } = payload
+
+    // ⭐ Fix 1: excluir el id local antes de insertar.
+    //    Supabase genera su propio UUID; enviar 'local_may_...' rompe el INSERT.
+    const insertPayload = { ...customer }
+    if (insertPayload.id?.startsWith('local_')) {
+      delete insertPayload.id
+    }
+    // Quitar campos que Supabase maneja solo (evita conflictos de timestamp)
+    delete insertPayload.created_at
+    delete insertPayload.updated_at
+    // Quitar `syncStatus` si por accidente viene del repo
+    delete insertPayload.syncStatus
+
     const { data, error } = await supabase
       .from('wholesale_customers')
-      .insert(customer)
+      .insert(insertPayload)
       .select()
       .single()
 
     if (error) return { ok: false, error: error.message }
 
+    // ⭐ Mapear el id local → UUID real de Supabase
     if (customer.id?.startsWith('local_')) {
       await mapLocalIdToServerId(customer.id, data.id)
     }
@@ -494,18 +508,206 @@ export const handlers = {
     const serverId = await resolveServerId(id)
 
     if (serverId?.startsWith('local_')) {
-      console.log(`ℹ️  UPDATE_CUSTOMER: ID local sin sync (${serverId})`)
-      return { ok: true }
+      // ⭐ Fix 2: NO marcar como OK. Devolver error para reintentar.
+      //    Escenario: el CREATE aún no se ha sincronizado y ya llegó el UPDATE.
+      //    Si marcamos OK aquí, perdemos la edición silenciosamente.
+      //    Devolviendo error, el syncQueue lo reintenta con backoff y
+      //    eventualmente el CREATE habrá terminado y el mapping existirá.
+      console.warn(
+        `⚠️ UPDATE_CUSTOMER: cliente ${id} sin serverId aún. Reintentando…`,
+      )
+      return {
+        ok: false,
+        error: `UPDATE_CUSTOMER: el cliente ${id} aún no tiene ID de servidor. Reintentando…`,
+      }
     }
+
+    // ⭐ Limpiar campos que no deben actualizarse desde acá
+    const cleanPatch = { ...patch }
+    delete cleanPatch.id
+    delete cleanPatch.created_at
+    delete cleanPatch.syncStatus
 
     const { error } = await supabase
       .from('wholesale_customers')
-      .update(patch)
+      .update(cleanPatch)
       .eq('id', serverId)
 
     if (error) return { ok: false, error: error.message }
     return { ok: true }
   },
+
+  // ---------------------------------------------------------------
+  // CRÉDITOS
+  // ---------------------------------------------------------------
+  [OP.CREATE_CREDIT]: async (payload) => {
+    const { credit, receivedBy } = payload
+
+    const { data, error } = await supabase
+      .from('customer_credits')
+      .insert({
+        customer_id: credit.customerId,
+        customer_name: credit.customerName,
+        amount: Number(credit.amount) || 0,
+        used: 0,
+        paid_amount: 0,
+        balance: Number(credit.amount) || 0,
+        due_date: credit.dueDate,
+        status: 'active',
+        notes: credit.notes || null,
+        created_by: receivedBy?.id || null,
+      })
+      .select()
+      .single()
+
+    if (error) return { ok: false, error: error.message }
+
+    if (credit.id?.startsWith('local_')) {
+      await mapLocalIdToServerId(credit.id, data.id)
+    }
+
+    return { ok: true, serverId: data.id }
+  },
+
+  [OP.UPDATE_CREDIT]: async (payload) => {
+    const { id, patch } = payload
+
+    const { resolveServerId } = await import('../../lib/idGenerator')
+    const serverId = await resolveServerId(id)
+
+    if (serverId?.startsWith('local_')) {
+      return {
+        ok: false,
+        error: `UPDATE_CREDIT: crédito ${id} aún sin serverId. Reintentando…`,
+      }
+    }
+
+    const updatePayload = { updated_at: new Date().toISOString() }
+    if (patch.status !== undefined) updatePayload.status = patch.status
+    if (patch.notes !== undefined) updatePayload.notes = patch.notes
+    if (patch.balance !== undefined) updatePayload.balance = Number(patch.balance)
+    if (patch.used !== undefined) updatePayload.used = Number(patch.used)
+    if (patch.paidAmount !== undefined) updatePayload.paid_amount = Number(patch.paidAmount)
+    if (patch.closedAt !== undefined) updatePayload.closed_at = patch.closedAt
+    if (patch.closedBy !== undefined) updatePayload.closed_by = patch.closedBy
+
+    const { error } = await supabase
+      .from('customer_credits')
+      .update(updatePayload)
+      .eq('id', serverId)
+
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  },
+
+  [OP.CREATE_CREDIT_CHARGE]: async (payload) => {
+    const { charge } = payload
+
+    const { resolveServerId } = await import('../../lib/idGenerator')
+    const creditId = await resolveServerId(charge.creditId)
+
+    if (creditId?.startsWith('local_')) {
+      return {
+        ok: false,
+        error: `CREATE_CREDIT_CHARGE: crédito ${charge.creditId} aún sin serverId. Reintentando…`,
+      }
+    }
+
+    const { data: credit, error: fetchErr } = await supabase
+      .from('customer_credits')
+      .select('amount, used, paid_amount')
+      .eq('id', creditId)
+      .single()
+
+    if (fetchErr) return { ok: false, error: fetchErr.message }
+
+    const newUsed = Number(credit.used) + Number(charge.amount)
+    const newAvailable = Number(credit.amount) - (newUsed - Number(credit.paid_amount))
+
+    const { error: updErr } = await supabase
+      .from('customer_credits')
+      .update({
+        used: newUsed,
+        balance: newAvailable,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', creditId)
+
+    if (updErr) return { ok: false, error: updErr.message }
+    return { ok: true }
+  },
+
+  [OP.CREATE_CREDIT_PAYMENT]: async (payload) => {
+    const { payment, receivedBy } = payload
+
+    const { resolveServerId } = await import('../../lib/idGenerator')
+    const creditId = await resolveServerId(payment.creditId)
+
+    if (creditId?.startsWith('local_')) {
+      return {
+        ok: false,
+        error: `CREATE_CREDIT_PAYMENT: crédito ${payment.creditId} aún sin serverId. Reintentando…`,
+      }
+    }
+
+    // 1. Insertar pago
+    const { data: paymentData, error: payErr } = await supabase
+      .from('credit_payments')
+      .insert({
+        credit_id: creditId,
+        customer_id: payment.customerId,
+        amount: Number(payment.amount) || 0,
+        method: payment.method || 'cash',
+        received_by: receivedBy?.id || null,
+        received_by_name: receivedBy?.name || 'Usuario',
+        cash_session_id: payment.cashSessionId || null,
+        notes: payment.notes || null,
+      })
+      .select()
+      .single()
+
+    if (payErr) return { ok: false, error: payErr.message }
+
+    // 2. Leer crédito para recalcular
+    const { data: credit, error: fetchErr } = await supabase
+      .from('customer_credits')
+      .select('amount, used, paid_amount')
+      .eq('id', creditId)
+      .single()
+
+    if (fetchErr) return { ok: false, error: fetchErr.message }
+
+    const newPaid = Number(credit.paid_amount) + Number(payment.amount)
+    const newOutstanding = Number(credit.used) - newPaid
+    const newAvailable = Number(credit.amount) - newOutstanding
+    const isFullyPaid = newOutstanding <= 0.01
+
+    // 3. Actualizar crédito
+    const creditUpdate = {
+      paid_amount: newPaid,
+      balance: newAvailable,
+      updated_at: new Date().toISOString(),
+    }
+    if (isFullyPaid) {
+      creditUpdate.status = 'paid'
+      creditUpdate.closed_at = new Date().toISOString()
+      creditUpdate.closed_by = receivedBy?.id || null
+    }
+
+    const { error: updErr } = await supabase
+      .from('customer_credits')
+      .update(creditUpdate)
+      .eq('id', creditId)
+
+    if (updErr) return { ok: false, error: updErr.message }
+
+    if (payment.id?.startsWith('local_')) {
+      await mapLocalIdToServerId(payment.id, paymentData.id)
+    }
+
+    return { ok: true, serverId: paymentData.id }
+  },
+
 
   // ---------------------------------------------------------------
   // USUARIOS / PERFILES

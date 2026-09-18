@@ -58,6 +58,8 @@ export const wholesaleService = {
       price_list: payload.priceList || 'public',
       default_discount: Number(payload.defaultDiscount) || 0,
       max_discount: Number(payload.maxDiscount) || 0,
+      // ⭐ NUEVO: escalones normalizados
+      discount_tiers: normalizeTiers(payload.discountTiers),
       min_purchase_amount: Number(payload.minPurchaseAmount) || 0,
       min_purchase_units: Number(payload.minPurchaseUnits) || 0,
 
@@ -122,6 +124,8 @@ export const wholesaleService = {
       priceList: 'price_list',
       defaultDiscount: 'default_discount',
       maxDiscount: 'max_discount',
+      // ⭐ NUEVO
+      discountTiers: 'discount_tiers',
       minPurchaseAmount: 'min_purchase_amount',
       minPurchaseUnits: 'min_purchase_units',
       creditEnabled: 'credit_enabled',
@@ -138,7 +142,14 @@ export const wholesaleService = {
     }
 
     Object.entries(map).forEach(([camel, snake]) => {
-      if (patch[camel] !== undefined) updatePayload[snake] = patch[camel]
+      if (patch[camel] !== undefined) {
+        // ⭐ Normalizar discountTiers antes de guardar
+        if (camel === 'discountTiers') {
+          updatePayload[snake] = normalizeTiers(patch[camel])
+        } else {
+          updatePayload[snake] = patch[camel]
+        }
+      }
     })
 
     const { data, error } = await supabase
@@ -175,4 +186,36 @@ export const wholesaleService = {
     const num = parseInt(last.replace('MAY-', ''), 10) || 0
     return `MAY-${String(num + 1).padStart(5, '0')}`
   },
+}
+
+/**
+ * ⭐ Normaliza los tiers antes de guardarlos en Supabase.
+ *
+ * Reglas:
+ *   - Solo acepta arrays.
+ *   - Cada tier debe tener `minQty > 0` y `discount >= 0`.
+ *   - Ordena por minQty ascendente.
+ *   - Deduplica por minQty (se queda con el último si hay repetidos).
+ *   - Devuelve array vacío si no hay tiers válidos.
+ */
+function normalizeTiers(input) {
+  if (!Array.isArray(input)) return []
+
+  const clean = input
+    .map((t) => ({
+      minQty: Number(t?.minQty) || 0,
+      discount: Number(t?.discount) || 0,
+    }))
+    .filter((t) => t.minQty > 0 && t.discount >= 0)
+
+  // Ordenar por minQty asc
+  clean.sort((a, b) => a.minQty - b.minQty)
+
+  // Deduplicar por minQty (queda el último que aparece)
+  const byQty = new Map()
+  for (const t of clean) {
+    byQty.set(t.minQty, t)
+  }
+
+  return Array.from(byQty.values())
 }

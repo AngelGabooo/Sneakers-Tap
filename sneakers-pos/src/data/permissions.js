@@ -143,6 +143,8 @@ export const MODULES = [
       { key: 'wholesale.authorize_over_credit', label: 'Autorizar exceso de crédito', critical: true },
       { key: 'wholesale.account',       label: 'Ver cuenta' },
       { key: 'wholesale.export',        label: 'Exportar mayoristas' },
+      { key: 'credits.view', label: 'Ver créditos', group: 'Operación' },
+
     ],
   },
   {

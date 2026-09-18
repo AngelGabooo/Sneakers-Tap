@@ -23,7 +23,7 @@ const VIEW_BY_TYPE: Record<string, string> = {
   return:     'sales-history',
   cash_open:  'cash-current',
   cash_close: 'cash-history',
-  inventory:  'inventory-movements',
+  inventory:  'inventory-alerts',   // ⭐ Cambiado de 'inventory-movements'
   product:    'products',
   wholesale:  'wholesale',
   user:       'users',
@@ -34,14 +34,13 @@ const VIEW_BY_TYPE: Record<string, string> = {
 
 // ⭐ Reintentos con backoff exponencial
 const MAX_RETRIES = 3
-const BASE_DELAY_MS = 1000 // 1s, 2s, 4s
+const BASE_DELAY_MS = 1000
 
-// Errores que SÍ vale la pena reintentar
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504])
 
 function isRetryable(err: any): boolean {
   const code = err?.statusCode
-  if (!code) return true // timeout / network error → reintentar
+  if (!code) return true
   if (code >= 500) return true
   return RETRYABLE_STATUS.has(code)
 }
@@ -62,12 +61,10 @@ async function sendWithRetry(sub: any, payload: string): Promise<{ ok: boolean; 
     } catch (err: any) {
       lastError = err
 
-      // Errores permanentes: NO reintentar (suscripción caducada, keys inválidas)
       if (!isRetryable(err)) {
         return { ok: false, error: err }
       }
 
-      // Último intento → devolver error
       if (attempt === MAX_RETRIES - 1) {
         console.warn(
           `⚠️ Push falló tras ${MAX_RETRIES} intentos para ${sub.endpoint.slice(0, 40)}: ${err.message}`,
@@ -75,7 +72,6 @@ async function sendWithRetry(sub: any, payload: string): Promise<{ ok: boolean; 
         return { ok: false, error: err }
       }
 
-      // Backoff exponencial: 1s, 2s, 4s...
       const delay = BASE_DELAY_MS * Math.pow(2, attempt)
       console.log(
         `🔁 Reintento ${attempt + 1}/${MAX_RETRIES} en ${delay}ms (status ${err.statusCode || 'net'})`,
@@ -142,6 +138,8 @@ serve(async (req) => {
     const saleId = meta.saleId || null
     const sessionId = meta.sessionId || null
     const productId = meta.productId || null
+    const variantId = meta.variantId || null      // ⭐ NUEVO
+    const alertType = meta.alertType || null      // ⭐ NUEVO
 
     // 4. Armar payload
     const payload = JSON.stringify({
@@ -151,7 +149,6 @@ serve(async (req) => {
       badge: '/icon-192.png',
       tag: notif.id,
       priority: notif.priority,
-      // ⭐ Sonido custom solo se usa en Android. iOS lo ignora.
       sound: notif.priority === 'critical' ? '/sounds/critical.wav' : undefined,
       url: `${APP_ORIGIN}/`,
       view: targetView,
@@ -160,11 +157,12 @@ serve(async (req) => {
       saleId,
       sessionId,
       productId,
+      variantId,                                  // ⭐ NUEVO
+      alertType,                                  // ⭐ NUEVO
     })
 
     // 5. Enviar a cada suscripción (con reintentos)
     let sent = 0
-    let retried = 0
     const errors: any[] = []
 
     for (const sub of subs) {
@@ -183,7 +181,6 @@ serve(async (req) => {
           statusCode: err?.statusCode,
         })
 
-        // Suscripción caducada → borrar
         if (err?.statusCode === 410 || err?.statusCode === 404) {
           console.log(`🗑️ Borrando suscripción caducada de ${sub.user_id}`)
           await supabase.from('push_subscriptions').delete().eq('id', sub.id)

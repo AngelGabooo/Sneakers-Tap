@@ -22,6 +22,7 @@ import { useProducts } from '../context/ProductsContext'
 import { useSales } from '../context/SalesContext'
 import { useCash } from '../context/CashContext'
 import { useSettings } from '../context/SettingsContext'
+import { useCredit } from '../context/CreditContext'
 import { openCashDrawer, printReceipt } from '../services/printerService'
 import { notifySale } from '../utils/notifyAdmins'
 
@@ -31,11 +32,14 @@ export default function Pos() {
   const { products } = useProducts()
   const { createSale } = useSales()
   const { getAnyOpenSession } = useCash()
+  const { getActiveByCustomer, registerCharge } = useCredit()
   const { settings } = useSettings()
   const { store, ticket } = settings
 
   const {
     items, customer, totals,
+    totalPares,
+    volumeDiscount,
     addItem, updateQuantity, removeItem, clear,
     setCustomer,
   } = useCart()
@@ -44,6 +48,12 @@ export default function Pos() {
   const cashOpen = !!openSession
   const cashId = openSession?.cashLabel || 'Sin caja'
   const cashBranch = openSession?.branch || 'Tienda principal'
+
+  // ⭐ Crédito activo del cliente actual
+  const activeCredit = useMemo(() => {
+    if (!customer?.isWholesale || !customer?.id) return null
+    return getActiveByCustomer(customer.id)
+  }, [customer, getActiveByCustomer])
 
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('all')
@@ -101,15 +111,15 @@ export default function Pos() {
         rfc:     ticket.header.showRfc   ? store.rfc   || null : null,
       },
       ticketOptions: {
-  showNumber:         ticket.sale.showNumber,
-  showDate:           ticket.sale.showDate,
-  showTime:           ticket.sale.showTime,
-  showSeller:         ticket.sale.showSeller,
-  showCash:           ticket.sale.showCash,
-  showBranch:         ticket.sale.showBranch,
-  showCustomer:       ticket.sale.showCustomer,
-  showPaymentMethod:  ticket.sale.showPaymentMethod,
-},
+        showNumber:        ticket.sale.showNumber,
+        showDate:          ticket.sale.showDate,
+        showTime:          ticket.sale.showTime,
+        showSeller:        ticket.sale.showSeller,
+        showCash:          ticket.sale.showCash,
+        showBranch:        ticket.sale.showBranch,
+        showCustomer:      ticket.sale.showCustomer,
+        showPaymentMethod: ticket.sale.showPaymentMethod,
+      },
       ticketFooter: {
         thankYouMessage: ticket.footer.showThankYou    ? ticket.footer.thankYouMessage || null : null,
         returnPolicy:    ticket.footer.showReturnPolicy ? ticket.footer.returnPolicy   || null : null,
@@ -283,6 +293,25 @@ export default function Pos() {
       }
     }
 
+    // ⭐ Validar método crédito
+    if (payment.method === 'credit') {
+      if (!activeCredit) {
+        setToast({
+          title: 'Sin crédito activo',
+          description: 'Este cliente no tiene un crédito otorgado.',
+        })
+        return
+      }
+      const available = Number(activeCredit.available) || 0
+      if (available < totals.total) {
+        setToast({
+          title: 'Saldo insuficiente',
+          description: `El saldo disponible ($${available.toLocaleString('es-MX')}) es menor al total.`,
+        })
+        return
+      }
+    }
+
     setSubmitting(true)
 
     const methodLabel =
@@ -291,6 +320,7 @@ export default function Pos() {
         ? `Tarjeta (${payment.cardType === 'credit' ? 'Crédito' : 'Débito'})`
       : payment.method === 'transfer' ? 'Transferencia'
       : payment.method === 'digital' ? 'Pago digital'
+      : payment.method === 'credit' ? 'Crédito'
       : 'Otro'
 
     const wholesaleSnapshot = customer?.isWholesale
@@ -310,7 +340,6 @@ export default function Pos() {
     const sellerRole = user?.role || 'Vendedor'
 
     try {
-      // ✅ AWAIT — antes faltaba
       const sale = await createSale({
         cashier: sellerName,
         cashierRole: sellerRole,
@@ -353,8 +382,35 @@ export default function Pos() {
         cashId,
         cashSessionId: openSession?.id || null,
         cashRegisterId: openSession?.id || 'CAJ-000001',
-        notes: '',
+        notes: payment.method === 'credit' ? `Cargo a crédito · ${activeCredit?.id || ''}` : '',
       })
+
+      // ⭐ Si el pago es a crédito, registrar el CARGO (no pago)
+      if (payment.method === 'credit' && activeCredit) {
+        try {
+          await registerCharge({
+            charge: {
+              creditId: activeCredit.id,
+              amount: totals.total,
+              saleId: sale.id,
+              saleFolio: sale.folio,
+              notes: `Venta ${sale.folio}`,
+            },
+            receivedBy: {
+              id: user?.id,
+              name: user?.name,
+              role: user?.role,
+            },
+          })
+          console.log('✅ Cargo a crédito registrado')
+        } catch (chargeErr) {
+          console.error('❌ Error registrando cargo a crédito:', chargeErr)
+          setToast({
+            title: '⚠️ Venta creada con aviso',
+            description: `No se pudo registrar el cargo a crédito: ${chargeErr.message}`,
+          })
+        }
+      }
 
       const fullSale = { ...sale, methodLabel }
       setSuccessSale(fullSale)
@@ -484,6 +540,8 @@ export default function Pos() {
                 items={items}
                 totals={totals}
                 customer={customer}
+                totalPares={totalPares}
+                volumeDiscount={volumeDiscount}
                 onQuantityChange={updateQuantity}
                 onRemove={removeItem}
                 onClear={handleClearCart}
@@ -516,6 +574,8 @@ export default function Pos() {
               items={items}
               totals={totals}
               customer={customer}
+              totalPares={totalPares}
+              volumeDiscount={volumeDiscount}
               onQuantityChange={updateQuantity}
               onRemove={removeItem}
               onClear={handleClearCart}
@@ -548,6 +608,8 @@ export default function Pos() {
       <PosCheckoutModal
         open={checkoutOpen}
         totals={totals}
+        customer={customer}
+        activeCredit={activeCredit}
         onClose={() => setCheckoutOpen(false)}
         onConfirm={handleConfirmSale}
         submitting={submitting}

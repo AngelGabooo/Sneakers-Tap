@@ -1,6 +1,6 @@
 // src/pages/Dashboard.jsx
 import { useMemo, useState } from 'react'
-import { DollarSign, ShoppingBag, TrendingUp, Warehouse, Receipt } from 'lucide-react'
+import { DollarSign, ShoppingBag, TrendingUp, Warehouse, Receipt, HandCoins } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import StatCard from '../components/dashboard/StatCard'
 import SalesChart from '../components/dashboard/SalesChart'
@@ -508,11 +508,12 @@ export default function Dashboard() {
   /* ---------------------------------------------------------------- */
   const paymentMethods = useMemo(() => {
     const methods = {
-      cash: { label: 'Efectivo', count: 0, total: 0, color: '#22C55E' },
-      card: { label: 'Tarjeta', count: 0, total: 0, color: '#2563EB' },
+      cash:     { label: 'Efectivo',      count: 0, total: 0, color: '#22C55E' },
+      card:     { label: 'Tarjeta',       count: 0, total: 0, color: '#2563EB' },
       transfer: { label: 'Transferencia', count: 0, total: 0, color: '#8B5CF6' },
-      digital: { label: 'Pago digital', count: 0, total: 0, color: '#F59E0B' },
-      other: { label: 'Otro', count: 0, total: 0, color: '#6B7280' },
+      digital:  { label: 'Pago digital',  count: 0, total: 0, color: '#F59E0B' },
+      credit:   { label: 'Crédito',       count: 0, total: 0, color: '#EC4899' },   // ⭐ NUEVO
+      other:    { label: 'Otro',          count: 0, total: 0, color: '#6B7280' },
     }
 
     periodSales.forEach((s) => {
@@ -599,6 +600,7 @@ export default function Dashboard() {
           : s.payment?.method === 'card' ? 'Tarjeta'
           : s.payment?.method === 'transfer' ? 'Transferencia'
           : s.payment?.method === 'digital' ? 'Digital'
+          : s.payment?.method === 'credit' ? 'Crédito'   // ⭐ NUEVO
           : '—',
         cashier: s.cashier || '—',
         status: s.status || 'completed',

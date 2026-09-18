@@ -15,6 +15,7 @@ import { SyncProvider } from './context/SyncContext.jsx'
 import { UsersProvider } from './context/UsersContext.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { NotificationsProvider } from './context/NotificationsContext.jsx'
+import { CreditProvider } from './context/CreditContext.jsx'   // ⭐ NUEVO
 import { ViewProvider } from './context/ViewContext.jsx'
 import { ProductsProvider } from './context/ProductsContext.jsx'
 import { MovementsProvider } from './context/MovementsContext.jsx'
@@ -98,27 +99,30 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <UsersProvider>
             <AuthProvider>
               <NotificationsProvider>
-                <ViewProvider defaultView="dashboard">
-                  <ProductsProvider>
-                    <MovementsProvider>
-                      <CashProvider>
-                        <CartProvider>
-                          <SalesProvider>
-                            <WholesaleProvider>
-                              <RolesProvider>
-                                <AuditProvider>
-                                  <SettingsProvider>
-                                    <App />
-                                  </SettingsProvider>
-                                </AuditProvider>
-                              </RolesProvider>
-                            </WholesaleProvider>
-                          </SalesProvider>
-                        </CartProvider>
-                      </CashProvider>
-                    </MovementsProvider>
-                  </ProductsProvider>
-                </ViewProvider>
+                {/* ⭐ NUEVO: CreditProvider justo aquí, dentro de Auth y disponible para toda la app */}
+                <CreditProvider>
+                  <ViewProvider defaultView="dashboard">
+                    <ProductsProvider>
+                      <MovementsProvider>
+                        <CashProvider>
+                          <CartProvider>
+                            <SalesProvider>
+                              <WholesaleProvider>
+                                <RolesProvider>
+                                  <AuditProvider>
+                                    <SettingsProvider>
+                                      <App />
+                                    </SettingsProvider>
+                                  </AuditProvider>
+                                </RolesProvider>
+                              </WholesaleProvider>
+                            </SalesProvider>
+                          </CartProvider>
+                        </CashProvider>
+                      </MovementsProvider>
+                    </ProductsProvider>
+                  </ViewProvider>
+                </CreditProvider>
               </NotificationsProvider>
             </AuthProvider>
           </UsersProvider>

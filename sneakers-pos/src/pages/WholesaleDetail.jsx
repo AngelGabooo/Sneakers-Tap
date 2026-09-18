@@ -1,3 +1,4 @@
+// src/pages/WholesaleDetail.jsx
 import { useEffect, useMemo, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Toast from '../components/common/Toast'
@@ -9,8 +10,11 @@ import WholesaleDetailForm from '../components/wholesale/detail/WholesaleDetailF
 import WholesaleDetailSidebar from '../components/wholesale/detail/WholesaleDetailSidebar'
 import WholesaleDetailSkeleton from '../components/wholesale/detail/WholesaleDetailSkeleton'
 import WholesaleDetailEmpty from '../components/wholesale/detail/WholesaleDetailEmpty'
+import CreditGrantModal from '../components/wholesale/detail/CreditGrantModal'       // ⭐ NUEVO
 import { useView } from '../context/ViewContext'
 import { useWholesale } from '../context/WholesaleContext'
+import { useCredit } from '../context/CreditContext'                                 // ⭐ NUEVO
+import { useAuth } from '../context/AuthContext'                                     // ⭐ NUEVO
 
 const INITIAL_FORM = {
   id: null,
@@ -43,6 +47,10 @@ const INITIAL_FORM = {
   priceList: 'basic',
   defaultDiscount: '',
   maxDiscount: '',
+  discountTiers: [
+    { minQty: 4, discount: 5 },
+    { minQty: 8, discount: 10 },
+  ],
   minPurchaseAmount: '',
   minPurchaseUnits: '',
 
@@ -62,6 +70,8 @@ const INITIAL_FORM = {
 export default function WholesaleDetail({ mode = 'edit' }) {
   const { navigate, viewParams } = useView()
   const { getWholesaleById, updateWholesale } = useWholesale()
+  const { createCredit, getActiveByCustomer, refresh: refreshCredits } = useCredit()  // ⭐ NUEVO
+  const { user } = useAuth()                                                          // ⭐ NUEVO
 
   const wholesaleId = viewParams?.id
   const wholesale = wholesaleId ? getWholesaleById(wholesaleId) : null
@@ -73,8 +83,15 @@ export default function WholesaleDetail({ mode = 'edit' }) {
   const [activeTab, setActiveTab] = useState('summary')
   const [toast, setToast] = useState(null)
   const [dirty, setDirty] = useState(false)
+  const [grantModalOpen, setGrantModalOpen] = useState(false)                         // ⭐ NUEVO
+  const [grantSubmitting, setGrantSubmitting] = useState(false)                       // ⭐ NUEVO
 
-  // Cargar datos al montar (modo edición)
+  // ⭐ NUEVO: crédito activo del cliente
+  const activeCredit = useMemo(() => {
+    if (!wholesaleId) return null
+    return getActiveByCustomer(wholesaleId)
+  }, [wholesaleId, getActiveByCustomer])
+
   useEffect(() => {
     if (mode === 'new') {
       setForm(INITIAL_FORM)
@@ -101,7 +118,6 @@ export default function WholesaleDetail({ mode = 'edit' }) {
     setForm((f) => {
       const next = { ...f, [field]: value }
 
-      // Auto-sincronizaciones útiles
       if (field === 'condition' && !next.priceList) {
         next.priceList = value
       }
@@ -135,6 +151,23 @@ export default function WholesaleDetail({ mode = 'edit' }) {
       }
     }
 
+    const tiers = Array.isArray(form.discountTiers) ? form.discountTiers : []
+    for (let i = 0; i < tiers.length; i++) {
+      const t = tiers[i]
+      if (!(Number(t.minQty) > 0)) {
+        e.discountTiers = `El escalón #${i + 1} necesita una cantidad válida.`
+        break
+      }
+      if (!(Number(t.discount) >= 0)) {
+        e.discountTiers = `El escalón #${i + 1} necesita un % válido.`
+        break
+      }
+      if (i > 0 && Number(tiers[i].minQty) <= Number(tiers[i - 1].minQty)) {
+        e.discountTiers = 'Los escalones deben ir de menor a mayor cantidad.'
+        break
+      }
+    }
+
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -153,8 +186,59 @@ export default function WholesaleDetail({ mode = 'edit' }) {
           description: 'La información y condiciones comerciales fueron actualizadas.',
         })
       }
-      // En modo new delegamos a WholesaleNew
     }, 500)
+  }
+
+  // ⭐ NUEVO: Otorgar crédito
+  const handleGrantCredit = async ({ amount, dueDate, notes }) => {
+    setGrantSubmitting(true)
+    try {
+      // Validaciones locales
+      if (!form.creditEnabled) {
+        throw new Error('El cliente no tiene habilitado el crédito.')
+      }
+      if (!(Number(form.creditLimit) > 0)) {
+        throw new Error('Debes configurar un límite de crédito primero.')
+      }
+      if (activeCredit) {
+        throw new Error('Este cliente ya tiene un crédito activo.')
+      }
+      if (amount > Number(form.creditLimit)) {
+        throw new Error(`El monto supera el límite de $${Number(form.creditLimit).toLocaleString('es-MX')}.`)
+      }
+
+      await createCredit({
+        credit: {
+          customerId: form.id,
+          customerName: form.name,
+          amount,
+          dueDate,
+          notes,
+        },
+        receivedBy: {
+          id: user?.id,
+          name: user?.name,
+          role: user?.role,
+        },
+      })
+
+      // Refrescar créditos para que la sección se actualice
+      await refreshCredits()
+
+      setGrantModalOpen(false)
+      setToast({
+        title: '✅ Crédito otorgado',
+        description: `$${amount.toLocaleString('es-MX')} a ${form.name}. Vence el ${new Date(dueDate).toLocaleDateString('es-MX')}.`,
+      })
+    } catch (err) {
+      console.error('❌ Error otorgando crédito:', err)
+      setToast({
+        title: 'Error al otorgar crédito',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    } finally {
+      setGrantSubmitting(false)
+    }
   }
 
   const handleCancel = () => {
@@ -192,7 +276,6 @@ export default function WholesaleDetail({ mode = 'edit' }) {
     })
   }
 
-  // Stats dinámicos
   const stats = useMemo(() => {
     const limit = Number(form.creditLimit) || 0
     const used = Number(form.creditUsed) || 0
@@ -242,9 +325,7 @@ export default function WholesaleDetail({ mode = 'edit' }) {
           {mode === 'edit' && (
             <>
               <WholesaleDetailStats stats={stats} />
-
               <WholesaleDetailCredit credit={credit} />
-
               <WholesaleDetailTabs active={activeTab} onChange={setActiveTab} />
             </>
           )}
@@ -256,6 +337,16 @@ export default function WholesaleDetail({ mode = 'edit' }) {
                   form={form}
                   errors={errors}
                   onChange={handleChange}
+                  // ⭐ NUEVO: props para la sección de crédito
+                  creditSectionProps={
+                    mode === 'edit' && form.id
+                      ? {
+                          activeCredit,
+                          onGrant: () => setGrantModalOpen(true),
+                          onViewDetail: () => navigate('credits'),
+                        }
+                      : null
+                  }
                 />
               </div>
 
@@ -291,9 +382,18 @@ export default function WholesaleDetail({ mode = 'edit' }) {
         </>
       )}
 
+      {/* ⭐ NUEVO: Modal para otorgar crédito */}
+      <CreditGrantModal
+        open={grantModalOpen}
+        customer={form}
+        onClose={() => setGrantModalOpen(false)}
+        onSubmit={handleGrantCredit}
+        submitting={grantSubmitting}
+      />
+
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

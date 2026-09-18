@@ -1,3 +1,4 @@
+// src/pages/Wholesale.jsx
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
@@ -14,6 +15,7 @@ import WholesaleBulkBar from '../components/wholesale/WholesaleBulkBar'
 import WholesaleTable from '../components/wholesale/WholesaleTable'
 import WholesaleCardList from '../components/wholesale/WholesaleCardList'
 import WholesaleInactive from '../components/wholesale/WholesaleInactive'
+import ConfirmModal from '../components/common/ConfirmModal'         // ⭐ NUEVO
 import { useView } from '../context/ViewContext'
 import { useWholesale } from '../context/WholesaleContext'
 
@@ -53,7 +55,7 @@ function inPeriod(dateIso, period, customFrom, customTo) {
 
 export default function Wholesale() {
   const { navigate } = useView()
-  const { wholesales } = useWholesale()
+  const { wholesales, deleteWholesale } = useWholesale()             // ⭐ NUEVO
 
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -67,6 +69,8 @@ export default function Wholesale() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [toast, setToast] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)              // ⭐ NUEVO
+  const [deleting, setDeleting] = useState(false)                     // ⭐ NUEVO
 
   useEffect(() => {
     setLoading(true)
@@ -231,12 +235,7 @@ export default function Wholesale() {
     })
   }
 
-  const handleView = (w) => navigate('wholesale-detail', { id: w.id })
   const handleEdit = (w) => navigate('wholesale-edit', { id: w.id })
-  const handleNewSale = (w) => navigate('pos', { customerId: w.id })
-  const handleViewSales = (w) => navigate('sales-history', { customerId: w.id })
-  const handleViewAccount = (w) => console.log('Ver cuenta', w.id)
-  const handleViewAudit = (w) => navigate('audit', { wholesaleId: w.id })
 
   const handleToggleStatus = (w, status) => {
     setToast({
@@ -249,6 +248,33 @@ export default function Wholesale() {
       title: 'Cliente bloqueado',
       description: `${w.name} fue bloqueado para operaciones mayoristas.`,
     })
+  }
+
+  // ⭐ Abrir modal de confirmación
+  const handleDelete = (w) => {
+    setDeleteTarget(w)
+  }
+
+  // ⭐ Confirmar y eliminar
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await deleteWholesale(deleteTarget.id)
+      setDeleting(false)
+      setDeleteTarget(null)
+      setToast({
+        title: 'Cliente eliminado',
+        description: `${deleteTarget.name} fue eliminado permanentemente.`,
+      })
+    } catch (err) {
+      console.error('❌ Error eliminando mayorista:', err)
+      setDeleting(false)
+      setToast({
+        title: 'Error al eliminar',
+        description: err.message || 'Intenta de nuevo.',
+      })
+    }
   }
 
   return (
@@ -332,14 +358,10 @@ export default function Wholesale() {
             onToggleSelectAll={handleToggleSelectAll}
             sort={sort}
             onSortChange={handleSortChange}
-            onView={handleView}
             onEdit={handleEdit}
-            onNewSale={handleNewSale}
-            onViewSales={handleViewSales}
-            onViewAccount={handleViewAccount}
-            onViewAudit={handleViewAudit}
             onToggleStatus={handleToggleStatus}
             onBlock={handleBlock}
+            onDelete={handleDelete}
             searchQuery={search}
             filtersActive={filtersActive}
             onClearAll={handleClearAll}
@@ -358,7 +380,8 @@ export default function Wholesale() {
         <WholesaleCardList
           wholesales={paged}
           loading={loading}
-          onView={handleView}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
           searchQuery={search}
           filtersActive={filtersActive}
           onClearAll={handleClearAll}
@@ -366,11 +389,28 @@ export default function Wholesale() {
         />
       </div>
 
-      <WholesaleInactive clients={inactiveList} onView={handleView} />
+      <WholesaleInactive clients={inactiveList} onView={handleEdit} />
+
+      {/* ⭐ Modal de confirmación para eliminar */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="¿Eliminar cliente permanentemente?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" será eliminado junto con todo su historial. Esta acción NO se puede deshacer.`
+            : ''
+        }
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        tone="danger"
+        loading={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => !deleting && setDeleteTarget(null)}
+      />
 
       <Toast
         open={!!toast}
-        variant="success"
+        variant={toast?.title?.includes('Error') ? 'error' : 'success'}
         title={toast?.title}
         description={toast?.description}
         onClose={() => setToast(null)}

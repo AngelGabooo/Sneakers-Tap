@@ -1,6 +1,8 @@
+// src/components/pos/PosCheckoutModal.jsx
 import { useEffect, useMemo, useState } from 'react'
 import {
-  X, Banknote, CreditCard, ArrowRightLeft, Smartphone, MoreHorizontal, CheckCircle2,
+  X, Banknote, CreditCard, ArrowRightLeft, Smartphone, MoreHorizontal,
+  CheckCircle2, HandCoins, AlertTriangle,
 } from 'lucide-react'
 import Button from '../common/Button'
 
@@ -12,18 +14,23 @@ const METHODS = [
   { key: 'other',    label: 'Otro',          icon: MoreHorizontal },
 ]
 
-/**
- * Modal de cobro.
- * ⚠️ Todos los hooks van ANTES del `if (!open) return null`.
- */
-export default function PosCheckoutModal({ open, totals, onClose, onConfirm, submitting }) {
-  // ---- 1. Hooks de estado (siempre en el mismo orden) ----
+const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX')}`
+
+export default function PosCheckoutModal({
+  open,
+  totals,
+  onClose,
+  onConfirm,
+  submitting,
+  // ⭐ NUEVO: cliente + su crédito activo
+  customer,
+  activeCredit,
+}) {
   const [method, setMethod] = useState('cash')
   const [cashReceived, setCashReceived] = useState('')
   const [cardType, setCardType] = useState('debit')
   const [reference, setReference] = useState('')
 
-  // ---- 2. useEffect (reset al abrir) ----
   useEffect(() => {
     if (open) {
       setMethod('cash')
@@ -33,7 +40,6 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
     }
   }, [open])
 
-  // ---- 3. useMemo (ANTES del return) ----
   const total = Number(totals?.total) || 0
 
   const quickAmounts = useMemo(() => {
@@ -45,14 +51,36 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
   const received = Number(cashReceived) || 0
   const change = Math.max(0, received - total)
 
-  const canConfirm =
-    (method === 'cash' && received >= total) ||
-    method === 'card' ||
-    method === 'transfer' ||
-    method === 'digital' ||
-    method === 'other'
+  // ⭐ ¿Este cliente puede usar crédito?
+  const canUseCredit =
+    customer?.isWholesale &&
+    activeCredit &&
+    activeCredit.status === 'active' &&
+    Number(activeCredit.balance) > 0
 
-  // ---- 4. AHORA SÍ: return condicional (después de todos los hooks) ----
+  const creditBalance = canUseCredit ? Number(activeCredit.balance) : 0
+  const creditCoversSale = canUseCredit && creditBalance >= total
+
+  // ⭐ Métodos disponibles según el cliente
+  const availableMethods = useMemo(() => {
+    const list = [...METHODS]
+    if (canUseCredit) {
+      // Insertar "Crédito" al inicio si está disponible
+      list.unshift({
+        key: 'credit',
+        label: 'Crédito',
+        icon: HandCoins,
+      })
+    }
+    return list
+  }, [canUseCredit])
+
+  const canConfirm = useMemo(() => {
+    if (method === 'credit') return creditCoversSale
+    if (method === 'cash') return received >= total
+    return true
+  }, [method, received, total, creditCoversSale])
+
   if (!open) return null
 
   const handleConfirm = () => {
@@ -63,6 +91,8 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
       change: method === 'cash' ? change : 0,
       cardType: method === 'card' ? cardType : null,
       reference: reference || null,
+      // ⭐ Si es crédito, incluir el creditId
+      creditId: method === 'credit' ? activeCredit.id : null,
     })
   }
 
@@ -88,31 +118,71 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
         <div className="px-5 py-4 bg-blue-50 dark:bg-blue-950/30 border-b border-blue-100 dark:border-blue-900/50">
           <p className="text-xs text-brand-blue dark:text-blue-300">Total a pagar</p>
           <p className="text-3xl font-bold text-brand-blueDark dark:text-blue-200 mt-1">
-            ${total.toLocaleString('es-MX')}
+            {fmt(total)}
           </p>
         </div>
 
         {/* Contenido */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Info del crédito activo */}
+          {canUseCredit && (
+            <div className="
+              flex items-start gap-3 p-3 rounded-lg
+              bg-emerald-50 dark:bg-emerald-950/30
+              border border-emerald-200 dark:border-emerald-900/50
+            ">
+              <HandCoins size={16} className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  Crédito activo disponible
+                </p>
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
+                  Saldo: <span className="font-bold">{fmt(creditBalance)}</span> · Vence{' '}
+                  {new Date(activeCredit.dueDate).toLocaleDateString('es-MX', {
+                    day: '2-digit', month: 'short',
+                  })}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ⚠️ Cliente con crédito activo pero saldo insuficiente */}
+          {canUseCredit && !creditCoversSale && (
+            <div className="
+              flex items-start gap-3 p-3 rounded-lg
+              bg-amber-50 dark:bg-amber-950/30
+              border border-amber-200 dark:border-amber-900/50
+            ">
+              <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+              <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                El saldo del crédito ({fmt(creditBalance)}) es menor al total de la venta. No se puede cobrar completo con crédito.
+              </p>
+            </div>
+          )}
+
           {/* Métodos */}
           <div>
             <p className="text-xs uppercase tracking-wider font-semibold text-gray-500 dark:text-dark-muted mb-2">
               Método de pago
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {METHODS.map(({ key, label, icon: Icon }) => {
+              {availableMethods.map(({ key, label, icon: Icon }) => {
                 const active = method === key
+                const disabled = key === 'credit' && !creditCoversSale
                 return (
                   <button
                     key={key}
                     type="button"
-                    onClick={() => setMethod(key)}
+                    onClick={() => !disabled && setMethod(key)}
+                    disabled={disabled}
                     className={`
                       flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border
                       transition-colors
                       ${active
                         ? 'bg-brand-blue text-white border-brand-blue'
-                        : 'bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted border-gray-200 dark:border-dark-border hover:border-brand-blue hover:text-brand-blue'}
+                        : disabled
+                          ? 'bg-gray-50 dark:bg-dark-surface text-gray-300 dark:text-dark-border border-gray-200 dark:border-dark-border cursor-not-allowed'
+                          : 'bg-white dark:bg-dark-card text-gray-700 dark:text-dark-muted border-gray-200 dark:border-dark-border hover:border-brand-blue hover:text-brand-blue'}
                     `}
                   >
                     <Icon size={18} strokeWidth={2} />
@@ -154,7 +224,7 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
                       onClick={() => setCashReceived(String(amt))}
                       className="h-9 px-3 rounded-lg text-sm font-medium bg-gray-100 dark:bg-dark-surface text-gray-700 dark:text-dark-text hover:bg-brand-blue hover:text-white transition-colors"
                     >
-                      ${amt.toLocaleString('es-MX')}
+                      {fmt(amt)}
                     </button>
                   ))}
                 </div>
@@ -164,9 +234,7 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
                 <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-3">
                   <p className="text-xs text-emerald-800 dark:text-emerald-300">
                     Cambio:{' '}
-                    <span className="text-lg font-bold">
-                      ${change.toLocaleString('es-MX')}
-                    </span>
+                    <span className="text-lg font-bold">{fmt(change)}</span>
                   </p>
                 </div>
               )}
@@ -177,6 +245,36 @@ export default function PosCheckoutModal({ open, totals, onClose, onConfirm, sub
                 </p>
               )}
             </>
+          )}
+
+          {/* Crédito */}
+          {method === 'credit' && (
+            <div className="
+              p-4 rounded-lg bg-blue-50/60 dark:bg-blue-950/20
+              border border-blue-200 dark:border-blue-900/40
+            ">
+              <p className="text-sm font-semibold text-brand-black dark:text-dark-text mb-2">
+                Detalles del cargo a crédito
+              </p>
+              <div className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-dark-muted">Saldo actual:</span>
+                  <span className="font-semibold text-brand-black dark:text-dark-text">
+                    {fmt(creditBalance)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600 dark:text-dark-muted">Esta venta:</span>
+                  <span className="font-semibold text-brand-red">-{fmt(total)}</span>
+                </div>
+                <div className="flex justify-between pt-1.5 border-t border-blue-200 dark:border-blue-900/40">
+                  <span className="font-semibold text-brand-black dark:text-dark-text">Nuevo saldo:</span>
+                  <span className="font-bold text-brand-blueDark dark:text-blue-200">
+                    {fmt(creditBalance - total)}
+                  </span>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Tarjeta */}

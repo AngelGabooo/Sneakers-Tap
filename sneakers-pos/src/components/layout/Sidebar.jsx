@@ -4,11 +4,12 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ShoppingBag,
   Wallet, Users, UserCog, ShieldCheck, BarChart3, Bell,
   History, Settings, X, Activity, AlertTriangle, SlidersHorizontal,
-  Receipt,
+  Receipt, HandCoins,        // ⭐ NUEVO icono
 } from 'lucide-react'
 import SneakersLogo from '../login/SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
 import { useProducts } from '../../context/ProductsContext'
+import { useCredit } from '../../context/CreditContext'   // ⭐ NUEVO
 import { usePermissions } from '../../hooks/usePermissions'
 
 const NAV_SECTIONS = [
@@ -35,12 +36,7 @@ const NAV_SECTIONS = [
       { key: 'inventory-alerts',    label: 'Alertas de stock',   icon: AlertTriangle,      permission: 'inventory.view', badge: 'alerts' },
     ],
   },
-  {
-    label: 'Compras',
-    items: [
-      { key: 'purchases', label: 'Compras', icon: ShoppingBag, permission: 'purchases.view' },
-    ],
-  },
+  
   {
     label: 'Caja',
     items: [
@@ -53,7 +49,8 @@ const NAV_SECTIONS = [
   {
     label: 'Operación',
     items: [
-      { key: 'wholesale', label: 'Clientes mayoristas', icon: UserCog, permission: 'wholesale.view' },
+      { key: 'wholesale', label: 'Clientes mayoristas', icon: UserCog,    permission: 'wholesale.view' },
+      { key: 'credits',   label: 'Créditos',            icon: HandCoins,  permission: 'credits.view', badge: 'credits' },   // ⭐ NUEVO
     ],
   },
   {
@@ -75,6 +72,7 @@ const NAV_SECTIONS = [
 
 export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpen, onCloseMobile, user }) {
   const { products } = useProducts()
+  const { overdueCount } = useCredit()                       // ⭐ NUEVO
   const { can } = usePermissions()
 
   /**
@@ -102,7 +100,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
 
   /**
    * Filtra las secciones según permisos del usuario.
-   * Una sección que queda vacía no se muestra.
    */
   const visibleSections = useMemo(() => {
     return NAV_SECTIONS
@@ -128,7 +125,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
         />
       )}
 
-      {/* ⭐ Añadido: safe-sidebar (respeta notch arriba y home indicator abajo en móvil) */}
       <aside
         className={`
           safe-sidebar
@@ -168,7 +164,13 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
                 <ul className="space-y-0.5">
                   {section.items.map(({ key, label, icon: Icon, badge }) => {
                     const active = key === activeKey
-                    const showBadge = badge === 'alerts' && alertCount > 0
+
+                    // ⭐ Badge: alertas de stock O créditos vencidos
+                    let badgeValue = 0
+                    if (badge === 'alerts')   badgeValue = alertCount
+                    if (badge === 'credits')  badgeValue = overdueCount
+
+                    const showBadge = badgeValue > 0
 
                     return (
                       <li key={key}>
@@ -194,7 +196,7 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
                                 ? 'bg-brand-blue text-white'
                                 : 'bg-brand-red text-white'}
                             `}>
-                              {alertCount > 99 ? '99+' : alertCount}
+                              {badgeValue > 99 ? '99+' : badgeValue}
                             </span>
                           )}
                         </button>

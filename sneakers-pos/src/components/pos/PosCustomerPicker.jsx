@@ -51,6 +51,8 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
   if (!open) return null
 
   const handleSelectWholesale = (w) => {
+    // ⭐ FIX: incluir discountTiers al pasar el cliente al carrito.
+    //    Sin esto, CartContext no puede calcular el descuento por volumen.
     onSelect?.({
       id: w.id,
       name: w.name,
@@ -59,6 +61,16 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
       priceList: w.priceList,
       defaultDiscount: Number(w.defaultDiscount) || 0,
       maxDiscount: Number(w.maxDiscount) || 0,
+      // ⭐ NUEVO: normalizar tiers antes de pasarlos
+      discountTiers: Array.isArray(w.discountTiers)
+        ? w.discountTiers
+            .map((t) => ({
+              minQty: Number(t?.minQty) || 0,
+              discount: Number(t?.discount) || 0,
+            }))
+            .filter((t) => t.minQty > 0 && t.discount >= 0)
+            .sort((a, b) => a.minQty - b.minQty)
+        : [],
       minPurchaseAmount: Number(w.minPurchaseAmount) || 0,
       minPurchaseUnits: Number(w.minPurchaseUnits) || 0,
       creditLimit: Number(w.creditLimit) || 0,
@@ -86,15 +98,11 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
     onClose?.()
   }
 
-  /**
-   * ⭐ Navega a crear un nuevo cliente según el tab activo.
-   */
   const handleNewCustomer = () => {
     onClose?.()
     if (tab === 'wholesale') {
       navigate('wholesale-new')
     } else {
-      // TODO: navegar a crear cliente regular cuando exista la vista
       navigate('customers-new')
     }
   }
@@ -220,7 +228,7 @@ export default function PosCustomerPicker({ open, onClose, onSelect, onClearCust
           )}
         </div>
 
-        {/* Nuevo cliente — ⭐ AHORA FUNCIONA */}
+        {/* Nuevo cliente */}
         <div className="px-5 py-4 border-t border-gray-100 dark:border-dark-border shrink-0">
           <Button
             variant="primary"
@@ -268,7 +276,19 @@ function WholesaleItem({ wholesale, onClick }) {
     0,
     (Number(wholesale.creditLimit) || 0) - (Number(wholesale.creditUsed) || 0),
   )
-  const discount = Number(wholesale.defaultDiscount) || 0
+
+  // ⭐ FIX: mostrar el descuento base Y/O el primer escalón
+  const baseDiscount = Number(wholesale.defaultDiscount) || 0
+  const tiers = Array.isArray(wholesale.discountTiers) ? wholesale.discountTiers : []
+  const firstTier = tiers.length > 0 ? tiers[0] : null
+
+  // Etiqueta según qué tengamos
+  let discountLabel = null
+  if (firstTier && firstTier.discount > 0) {
+    discountLabel = `${firstTier.minQty}+ pares → ${firstTier.discount}%`
+  } else if (baseDiscount > 0) {
+    discountLabel = `${baseDiscount}% dto.`
+  }
 
   return (
     <button
@@ -290,10 +310,10 @@ function WholesaleItem({ wholesale, onClick }) {
           {wholesale.id} {wholesale.contactName && `· ${wholesale.contactName}`}
         </p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[11px] text-gray-500 dark:text-dark-muted">
-          {discount > 0 && (
+          {discountLabel && (
             <span className="inline-flex items-center gap-1 text-brand-blue font-medium">
               <Percent size={11} strokeWidth={2.4} />
-              {discount}% dto.
+              {discountLabel}
             </span>
           )}
           {creditAvailable > 0 && (

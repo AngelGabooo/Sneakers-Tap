@@ -1,12 +1,16 @@
+// src/components/wholesale/WholesaleRowActions.jsx
 import {
-  MoreHorizontal, Eye, Pencil, ShoppingCart, Receipt, Wallet, History, Power, Ban,
+  MoreHorizontal, Pencil, Power, Ban, Trash2,
 } from 'lucide-react'
 import IconButton from '../common/IconButton'
 import Dropdown, { DropdownItem } from '../common/Dropdown'
 
 export default function WholesaleRowActions({
   wholesale,
-  onView, onEdit, onNewSale, onViewSales, onViewAccount, onViewAudit, onToggleStatus, onBlock,
+  onEdit,
+  onToggleStatus,
+  onBlock,
+  onDelete,
 }) {
   const isActive = wholesale?.status === 'active'
   const isBlocked = wholesale?.status === 'blocked'
@@ -16,12 +20,9 @@ export default function WholesaleRowActions({
       align="right"
       trigger={<IconButton icon={MoreHorizontal} label="Acciones" />}
     >
-      <DropdownItem icon={Eye}          onClick={() => onView?.(wholesale)}>Ver detalle</DropdownItem>
-      <DropdownItem icon={Pencil}       onClick={() => onEdit?.(wholesale)}>Editar mayorista</DropdownItem>
-      <DropdownItem icon={ShoppingCart} onClick={() => onNewSale?.(wholesale)}>Nueva venta</DropdownItem>
-      <DropdownItem icon={Receipt}      onClick={() => onViewSales?.(wholesale)}>Ver ventas</DropdownItem>
-      <DropdownItem icon={Wallet}       onClick={() => onViewAccount?.(wholesale)}>Ver cuenta</DropdownItem>
-      <DropdownItem icon={History}      onClick={() => onViewAudit?.(wholesale)}>Ver auditoría</DropdownItem>
+      <DropdownItem icon={Pencil} onClick={() => onEdit?.(wholesale)}>
+        Editar mayorista
+      </DropdownItem>
 
       {isActive ? (
         <DropdownItem icon={Power} onClick={() => onToggleStatus?.(wholesale, 'suspended')}>
@@ -38,6 +39,10 @@ export default function WholesaleRowActions({
           Bloquear
         </DropdownItem>
       )}
+
+      <DropdownItem icon={Trash2} danger onClick={() => onDelete?.(wholesale)}>
+        Eliminar
+      </DropdownItem>
     </Dropdown>
   )
 }

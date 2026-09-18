@@ -9,7 +9,9 @@ import {
 } from 'react'
 import { productsRepo } from '../repositories/productsRepo'
 import { useNetwork } from './NetworkContext'
+import { useAuth } from './AuthContext'
 import { VARIANT_STOCK_CHANGED } from '../utils/events'
+import { supabase } from '../lib/supabase'
 
 const ProductsContext = createContext(null)
 
@@ -20,13 +22,17 @@ const ProductsContext = createContext(null)
  * - Al crear/editar/borrar: actualiza local + encola sync
  * - Al vender (VARIANT_STOCK_CHANGED): recarga locales para reflejar stock
  * - Al volver internet: re-sincroniza
+ * - ⭐ Realtime: escucha cambios en `products` y `product_variants`
+ *    para que la UI se actualice al instante entre dispositivos.
  */
 export function ProductsProvider({ children }) {
   const { isOnline } = useNetwork()
+  const { user } = useAuth()
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
+  const channelRef = useRef(null)
 
   const loadLocal = useCallback(async () => {
     try {
@@ -77,16 +83,67 @@ export function ProductsProvider({ children }) {
     return () => clearTimeout(timer)
   }, [isOnline, syncRemote])
 
-  // ⭐ Escuchar cambios de stock (disparados al vender/ajustar)
+  // ⭐ Escuchar cambios de stock locales (disparados al vender/ajustar en ESTE dispositivo)
   useEffect(() => {
     const handler = () => {
-      console.log('🔄 Refrescando productos por cambio de stock')
+      console.log('🔄 Refrescando productos por cambio de stock (local)')
       loadLocal()
     }
 
     window.addEventListener(VARIANT_STOCK_CHANGED, handler)
     return () => window.removeEventListener(VARIANT_STOCK_CHANGED, handler)
   }, [loadLocal])
+
+  // ⭐ ============================================================
+  // ⭐ REALTIME: escucha cambios en `products` y `product_variants`
+  //    para actualizar la UI al instante cuando OTRO dispositivo
+  //    cambie stock (ej: venta desde otra caja, ajuste manual, etc.)
+  // ============================================================
+  useEffect(() => {
+    if (!isOnline) return
+    if (!user) return
+
+    let debounceTimer = null
+    const scheduleRefresh = (reason) => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(async () => {
+        console.log(`🔄 Realtime products → syncRemote (${reason})`)
+        await syncRemote()
+      }, 800)
+    }
+
+    const channel = supabase
+      .channel('products-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        (payload) => {
+          console.log('📦 Realtime products:', payload.eventType)
+          scheduleRefresh(`products ${payload.eventType}`)
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'product_variants' },
+        (payload) => {
+          console.log('🎨 Realtime product_variants:', payload.eventType)
+          scheduleRefresh(`product_variants ${payload.eventType}`)
+        },
+      )
+      .subscribe((status) => {
+        console.log('📡 Realtime products status:', status)
+      })
+
+    channelRef.current = channel
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [isOnline, user, syncRemote])
 
   // API
   const getProductById = useCallback(

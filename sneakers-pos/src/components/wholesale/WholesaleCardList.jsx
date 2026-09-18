@@ -1,3 +1,4 @@
+// src/components/wholesale/WholesaleCardList.jsx
 import { Users, Search } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -18,7 +19,8 @@ const STATUS = {
 }
 
 export default function WholesaleCardList({
-  wholesales = [], loading = false, onView,
+  wholesales = [], loading = false,
+  onEdit, onDelete,
   searchQuery = '', filtersActive = false, onClearAll, onGoToNew,
 }) {
   const hasItems = wholesales.length > 0
@@ -81,11 +83,9 @@ export default function WholesaleCardList({
         const available = Math.max(0, limit - used)
 
         return (
-          <Card
-            key={w.id}
-            className="!p-4 cursor-pointer hover:shadow-cardHover transition-shadow"
-          >
-            <button className="w-full text-left" onClick={() => onView?.(w)}>
+          <Card key={w.id} className="!p-4">
+            {/* ⭐ Toda la card es clickable → editar */}
+            <button className="w-full text-left" onClick={() => onEdit?.(w)}>
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-lg bg-brand-blue text-white flex items-center justify-center font-semibold shrink-0">
@@ -131,6 +131,34 @@ export default function WholesaleCardList({
                 </div>
               </div>
             </button>
+
+            {/* ⭐ Botón Eliminar fuera del botón principal */}
+            <div className="flex items-center justify-end gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-dark-border">
+              <button
+                type="button"
+                onClick={() => onEdit?.(w)}
+                className="
+                  inline-flex items-center gap-1.5 h-8 px-3 rounded-md
+                  text-[11px] font-semibold
+                  text-brand-blue hover:bg-blue-50 dark:hover:bg-blue-950/40
+                  transition-colors
+                "
+              >
+                Editar
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete?.(w)}
+                className="
+                  inline-flex items-center gap-1.5 h-8 px-3 rounded-md
+                  text-[11px] font-semibold
+                  text-brand-red hover:bg-red-50 dark:hover:bg-red-950/40
+                  transition-colors
+                "
+              >
+                Eliminar
+              </button>
+            </div>
           </Card>
         )
       })}
