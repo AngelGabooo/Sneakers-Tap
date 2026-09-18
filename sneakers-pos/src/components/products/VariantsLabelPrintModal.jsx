@@ -1,8 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
-import { Printer, X, Tag, AlertTriangle } from 'lucide-react'
+import { toPng } from 'html-to-image'
+import { Printer, X, Tag, AlertTriangle, Loader2 } from 'lucide-react'
 import Button from '../common/Button'
 import BarcodeDisplay from '../common/BarcodeDisplay'
 import QrCodeDisplay from '../common/QrCodeDisplay'
+
+const PRINT_SERVER = 'http://localhost:3001'
+
+// Etiqueta DK-1201: 29mm × 90mm → proporción 3.103 : 1
+const LABEL_W = 360
+const LABEL_H = 116  // 360 / 3.103 ≈ 116
 
 /**
  * Expande cada variante en tantas etiquetas como stock tenga.
@@ -31,99 +38,70 @@ export default function VariantsLabelPrintModal({
   variants = [],
   codeType = 'barcode',
 }) {
-  const printRef = useRef(null)
   const [confirmingLarge, setConfirmingLarge] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
+
+  // Un ref por cada etiqueta renderizada
+  const labelRefs = useRef({})
 
   const labels = useMemo(() => expandVariantsToLabels(variants), [variants])
   const totalLabels = labels.length
 
   if (!open) return null
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (totalLabels > 200 && !confirmingLarge) {
       setConfirmingLarge(true)
       return
     }
 
-    const content = printRef.current?.innerHTML
-    if (!content) return
+    setError('')
+    setLoading(true)
+    setProgress({ current: 0, total: totalLabels })
 
-    const printWindow = window.open('', '_blank', 'width=800,height=900')
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Etiquetas — ${product.name || 'Producto'}</title>
-          <style>
-            @page { size: A4; margin: 8mm; }
-            * { box-sizing: border-box; }
-            body {
-              font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
-              margin: 0;
-              padding: 0;
-              background: #fff;
-              color: #111827;
-            }
-            .grid {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 6mm;
-            }
-            .label {
-              width: 60mm;
-              height: 40mm;
-              border: 1px dashed #d1d5db;
-              border-radius: 3mm;
-              padding: 3mm 4mm;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              text-align: center;
-              page-break-inside: avoid;
-            }
-            .brand {
-              font-size: 8px;
-              font-weight: 800;
-              letter-spacing: 1px;
-              color: #2563EB;
-              text-transform: uppercase;
-              margin-bottom: 1mm;
-            }
-            .name {
-              font-size: 11px;
-              font-weight: 700;
-              line-height: 1.15;
-              max-width: 100%;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-            }
-            .variant {
-              font-size: 10px;
-              font-weight: 700;
-              color: #1E3A8A;
-              margin: 1mm 0 2mm;
-            }
-            .code svg { display: block; margin: 0 auto; max-width: 100%; }
-            .sku {
-              font-size: 8px;
-              font-family: monospace;
-              color: #374151;
-              margin-top: 1mm;
-            }
-            @media print {
-              .label { border: 1px solid #e5e7eb; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="grid">${content}</div>
-        </body>
-      </html>
-    `)
-    printWindow.document.close()
-    printWindow.focus()
-    setTimeout(() => printWindow.print(), 350)
+    try {
+      // 1) Convertir cada etiqueta a PNG
+      const images = []
+      for (let i = 0; i < labels.length; i++) {
+        const label = labels[i]
+        const node = labelRefs.current[label.labelId]
+        if (!node) continue
+
+        const dataUrl = await toPng(node, {
+          pixelRatio: 3,
+          backgroundColor: '#ffffff',
+          cacheBust: true,
+          width: LABEL_W,
+          height: LABEL_H,
+        })
+        images.push(dataUrl)
+        setProgress({ current: i + 1, total: totalLabels })
+      }
+
+      if (images.length === 0) {
+        throw new Error('No se pudo generar ninguna etiqueta')
+      }
+
+      // 2) Enviar todas al print server en un solo POST
+      const res = await fetch(`${PRINT_SERVER}/print-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images }),
+      })
+
+      const json = await res.json()
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Error al imprimir')
+
+      onClose?.()
+    } catch (err) {
+      console.error(err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+      setProgress({ current: 0, total: 0 })
+    }
   }
 
   const hasLabels = totalLabels > 0
@@ -142,7 +120,7 @@ export default function VariantsLabelPrintModal({
           <div className="flex items-center gap-2">
             <Tag size={16} className="text-brand-blue" strokeWidth={2} />
             <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text">
-              Imprimir etiquetas
+              Imprimir etiquetas (QL-800 · DK-1201)
             </h3>
             <span className="text-xs text-gray-500 dark:text-dark-muted">
               ({totalLabels} {totalLabels === 1 ? 'etiqueta' : 'etiquetas'})
@@ -168,7 +146,7 @@ export default function VariantsLabelPrintModal({
             <AlertTriangle size={14} strokeWidth={2.2} className="mt-0.5 shrink-0" />
             <span>
               Vas a imprimir <strong>{totalLabels}</strong> etiquetas. Esto puede tardar unos segundos.
-              Vuelve a pulsar <strong>Imprimir todas</strong> para continuar.
+              Vuelve a pulsar <strong>Confirmar impresión</strong> para continuar.
             </span>
           </div>
         )}
@@ -201,45 +179,146 @@ export default function VariantsLabelPrintModal({
                 )}
               </p>
 
-              <div
-                ref={printRef}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-              >
+              {/* Grid de previews — cada uno con su ref para exportar a PNG */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {labels.map((v) => (
                   <div
                     key={v.labelId}
-                    className="
-                      bg-white dark:bg-white rounded-lg border border-gray-200 p-4
-                      flex flex-col items-center text-center
-                    "
+                    ref={(el) => { labelRefs.current[v.labelId] = el }}
+                    style={{
+                      width: `${LABEL_W}px`,
+                      height: `${LABEL_H}px`,
+                      background: '#ffffff',
+                      color: '#111827',
+                      padding: '8px 14px',
+                      boxSizing: 'border-box',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      overflow: 'hidden',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '4px',
+                      margin: '0 auto',
+                    }}
                   >
-                    <p className="text-[10px] font-bold tracking-wider text-brand-blue uppercase">
-                      SNEAKERS
-                    </p>
-                    <p className="text-sm font-bold text-brand-black leading-tight mt-0.5 max-w-full truncate">
-                      {product.name || 'Producto'}
-                    </p>
-                    <p className="text-xs font-bold text-brand-blueDark mt-1">
-                      Talla {v.size} · {v.color}
-                    </p>
+                    {/* Columna izquierda: info */}
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        gap: '2px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: '8px',
+                          fontWeight: 800,
+                          letterSpacing: '0.8px',
+                          color: '#2563EB',
+                          textTransform: 'uppercase',
+                          lineHeight: 1,
+                        }}
+                      >
+                        SNEAKERS
+                      </div>
 
-                    <div className="my-2">
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          lineHeight: 1.15,
+                          color: '#111827',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {product.name || 'Producto'}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: 600,
+                          color: '#1E3A8A',
+                          lineHeight: 1.1,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        Talla {v.size} · {v.color}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: '8px',
+                          color: '#6B7280',
+                          fontFamily: 'ui-monospace, monospace',
+                          lineHeight: 1.1,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {v.sku || '—'}
+                      </div>
+                    </div>
+
+                    {/* Separador */}
+                    <div
+                      style={{
+                        width: '1px',
+                        height: '80%',
+                        background: '#e5e7eb',
+                        flexShrink: 0,
+                      }}
+                    />
+
+                    {/* Columna derecha: código + precio */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '3px',
+                        flexShrink: 0,
+                      }}
+                    >
                       {codeType === 'qr' ? (
-                        <QrCodeDisplay value={v.barcode} size={90} />
+                        <QrCodeDisplay value={v.barcode} size={64} />
                       ) : (
                         <BarcodeDisplay
                           value={v.barcode}
                           format="CODE128"
-                          height={45}
-                          width={1.2}
-                          fontSize={9}
+                          height={40}
+                          width={1}
+                          fontSize={8}
                         />
                       )}
-                    </div>
 
-                    <p className="text-[10px] font-mono text-gray-700">
-                      {v.sku}
-                    </p>
+                      {product.salePrice != null && (
+                        <div
+                          style={{
+                            fontSize: '16px',
+                            fontWeight: 800,
+                            color: '#111827',
+                            lineHeight: 1,
+                            marginTop: '2px',
+                          }}
+                        >
+                          ${Number(product.salePrice).toLocaleString('es-MX')}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -250,24 +329,43 @@ export default function VariantsLabelPrintModal({
         {/* Footer */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 px-5 py-4 border-t border-gray-100 dark:border-dark-border shrink-0">
           <p className="text-xs text-gray-500 dark:text-dark-muted">
-            {hasLabels
-              ? <>Se imprimirán <strong>{totalLabels}</strong> {totalLabels === 1 ? 'etiqueta' : 'etiquetas'} (60×40 mm · A4 · 3 por fila).</>
-              : 'Sin etiquetas para imprimir.'}
+            {hasLabels ? (
+              loading ? (
+                <>Generando imagen {progress.current}/{progress.total}…</>
+              ) : (
+                <>
+                  Se imprimirán <strong>{totalLabels}</strong>{' '}
+                  {totalLabels === 1 ? 'etiqueta' : 'etiquetas'} · DK-1201 (29×90 mm)
+                </>
+              )
+            ) : (
+              'Sin etiquetas para imprimir.'
+            )}
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={onClose}>
+            <Button variant="secondary" onClick={onClose} disabled={loading}>
               Cancelar
             </Button>
             <Button
               variant="primary"
-              icon={Printer}
+              icon={loading ? Loader2 : Printer}
               onClick={handlePrint}
-              disabled={!hasLabels}
+              disabled={!hasLabels || loading}
             >
-              {confirmingLarge ? 'Confirmar impresión' : 'Imprimir todas'}
+              {loading
+                ? 'Imprimiendo…'
+                : confirmingLarge
+                  ? 'Confirmar impresión'
+                  : 'Imprimir todas'}
             </Button>
           </div>
         </div>
+
+        {error && (
+          <div className="px-5 py-3 bg-red-50 dark:bg-red-950/30 border-t border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-400 text-xs">
+            {error}
+          </div>
+        )}
       </div>
     </div>
   )
