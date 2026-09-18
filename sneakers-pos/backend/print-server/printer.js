@@ -11,6 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export const PRINTER_NAME = process.env.PRINTER_NAME || 'POS-80'
 export const PRINTER_PORT = process.env.PRINTER_PORT || 'LPT1:'
+export const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Brother QL-800'
 
 const PS_SCRIPT = join(__dirname, 'print-raw.ps1')
 
@@ -111,4 +112,72 @@ class EscPosBuilder {
 
 export function createPrinter() {
   return new EscPosBuilder(32)
+}
+
+// =====================================================================
+// Brother QL-800 — impresión de etiquetas como IMAGEN
+// =====================================================================
+
+const PS_LABEL_SCRIPT = join(__dirname, 'print-label.ps1')
+
+/**
+ * Envía una imagen (Buffer PNG/JPG) a la impresora de etiquetas.
+ * Usa el driver oficial de Brother en Windows vía System.Drawing.Printing.
+ *
+ * @param {Buffer} imageBuffer - Contenido binario de la imagen
+ * @param {Object} [opts]
+ * @param {string} [opts.printerName]  - Nombre de la impresora (por defecto LABEL_PRINTER_NAME)
+ * @param {number} [opts.paperWidth]   - Ancho en centésimas de pulgada (DK-1201 = 114)
+ * @param {number} [opts.paperHeight]  - Alto en centésimas de pulgada (DK-1201 = 354)
+ * @param {boolean} [opts.landscape]   - Orientación (true = acostada)
+ * @returns {Promise<boolean>}
+ */
+export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
+  const {
+    printerName = LABEL_PRINTER_NAME,
+    paperWidth = 114,   // DK-1201 29mm
+    paperHeight = 354,  // DK-1201 90mm
+    landscape = false,
+  } = opts
+
+  const tmpFile = join(tmpdir(), `sneakers-label-${Date.now()}.png`)
+  await writeFile(tmpFile, imageBuffer)
+
+  try {
+    const args = [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', PS_LABEL_SCRIPT,
+      '-ImagePath', tmpFile,
+      '-PrinterName', printerName,
+      '-PaperWidth', String(paperWidth),
+      '-PaperHeight', String(paperHeight),
+    ]
+    if (landscape) args.push('-Landscape')
+
+    const { stdout, stderr } = await execFileAsync('powershell.exe', args, {
+      windowsHide: true,
+    })
+
+    if (stderr && stderr.trim()) {
+      throw new Error(`PowerShell: ${stderr.trim()}`)
+    }
+    if (!stdout.includes('OK')) {
+      throw new Error(`Respuesta inesperada de PowerShell: ${stdout}`)
+    }
+    return true
+  } catch (err) {
+    throw new Error(`Error enviando etiqueta a impresora: ${err.message}`)
+  } finally {
+    await unlink(tmpFile).catch(() => {})
+  }
+}
+
+/**
+ * Decodifica un data URL ("data:image/png;base64,...") a Buffer.
+ */
+export function decodeDataUrl(dataUrl) {
+  const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl || '')
+  if (!m) throw new Error('data URL inválido')
+  return Buffer.from(m[1], 'base64')
 }

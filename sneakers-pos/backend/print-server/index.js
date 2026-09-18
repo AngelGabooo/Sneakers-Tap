@@ -1,13 +1,21 @@
 import express from 'express'
 import cors from 'cors'
-import { createPrinter, sendToPrinter, PRINTER_PORT, PRINTER_NAME } from './printer.js'
+import {
+  createPrinter,
+  sendToPrinter,
+  sendImageToLabelPrinter,
+  decodeDataUrl,
+  PRINTER_PORT,
+  PRINTER_NAME,
+  LABEL_PRINTER_NAME,
+} from './printer.js'
 import { getOpenDrawerBuffer } from './cashdrawer.js'
 
 const app = express()
 const PORT = process.env.PORT || 3001
 
 app.use(cors())
-app.use(express.json({ limit: '2mb' }))
+app.use(express.json({ limit: '10mb' }))
 
 // -------------------------------------------------------------
 // Healthcheck
@@ -16,7 +24,8 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     service: 'sneakers-print-server',
-    printer: `${PRINTER_NAME} (${PRINTER_PORT})`,
+    receiptPrinter: `${PRINTER_NAME} (${PRINTER_PORT})`,
+    labelPrinter: LABEL_PRINTER_NAME,
     at: new Date().toISOString(),
   })
 })
@@ -132,7 +141,6 @@ app.post('/print-receipt', async (req, res) => {
     printer.drawLine()
 
     // -------- PAGO --------
-    // Calcular methodLabel en el server
     const methodLabel = (() => {
       const m = sale.payment?.method
       const cardType = sale.payment?.cardType
@@ -180,14 +188,61 @@ app.post('/print-receipt', async (req, res) => {
 })
 
 // -------------------------------------------------------------
+// Imprimir etiqueta(s) en Brother QL-800 (DK-1201 · 29×90 mm)
+// Body:
+//   { imageDataUrl: "data:image/png;base64,..." }   → 1 etiqueta
+//   { images: ["data:image/png;base64,...", ...] }  → lote
+// -------------------------------------------------------------
+app.post('/print-label', async (req, res) => {
+  try {
+    const { imageDataUrl, images } = req.body
+
+    const list = Array.isArray(images)
+      ? images
+      : imageDataUrl
+        ? [imageDataUrl]
+        : []
+
+    if (list.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Falta "imageDataUrl" o "images" (array de data URLs)',
+      })
+    }
+
+    console.log(`🖨️  Imprimiendo ${list.length} etiqueta(s) en ${LABEL_PRINTER_NAME}`)
+
+    let printed = 0
+    for (const dataUrl of list) {
+      const buffer = decodeDataUrl(dataUrl)
+      await sendImageToLabelPrinter(buffer, {
+        printerName: LABEL_PRINTER_NAME,
+        paperWidth: 114,   // DK-1201 29mm
+        paperHeight: 354,  // DK-1201 90mm
+        landscape: false,  // ⚠️ si sale rotada, cambia a true
+      })
+      printed++
+    }
+
+    console.log(`✅ ${printed} etiqueta(s) enviada(s)`)
+    res.json({ ok: true, action: 'print-label', count: printed })
+  } catch (err) {
+    console.error('❌ Error al imprimir etiqueta:', err.message)
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// -------------------------------------------------------------
 // Iniciar servidor
 // -------------------------------------------------------------
 app.listen(PORT, () => {
   console.log('🖨️  Sneakers Print Server')
   console.log(`   Corriendo en http://localhost:${PORT}`)
-  console.log(`   Impresora: ${PRINTER_NAME} en ${PRINTER_PORT}`)
+  console.log(`   Tickets:   ${PRINTER_NAME} en ${PRINTER_PORT}`)
+  console.log(`   Etiquetas: ${LABEL_PRINTER_NAME}`)
   console.log('   Endpoints:')
   console.log('     GET  /health')
   console.log('     POST /open-drawer')
   console.log('     POST /print-receipt')
+  console.log('     POST /print-label')
 })
