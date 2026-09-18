@@ -34,6 +34,10 @@ export function ProductsProvider({ children }) {
   const mountedRef = useRef(true)
   const channelRef = useRef(null)
 
+  // ⭐ FIX: ref para mantener syncRemote accesible dentro del useEffect
+  //    sin tener que ponerlo en las dependencias (lo que recrea el canal).
+  const syncRemoteRef = useRef(null)
+
   const loadLocal = useCallback(async () => {
     try {
       const list = await productsRepo.getAllLocal()
@@ -57,6 +61,11 @@ export function ProductsProvider({ children }) {
       if (mountedRef.current) setSyncing(false)
     }
   }, [isOnline, loadLocal])
+
+  // ⭐ FIX: mantener la ref actualizada SIN disparar el efecto de Realtime
+  useEffect(() => {
+    syncRemoteRef.current = syncRemote
+  }, [syncRemote])
 
   // Al montar
   useEffect(() => {
@@ -108,12 +117,18 @@ export function ProductsProvider({ children }) {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(async () => {
         console.log(`🔄 Realtime products → syncRemote (${reason})`)
-        await syncRemote()
+        // ⭐ Usar la ref, NO syncRemote directamente
+        if (syncRemoteRef.current) {
+          await syncRemoteRef.current()
+        }
       }, 800)
     }
 
+    // ⭐ Nombre único para evitar conflictos si hay re-montajes
+    const channelName = `products-realtime-${Date.now()}`
+
     const channel = supabase
-      .channel('products-realtime')
+      .channel(channelName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'products' },
@@ -143,7 +158,9 @@ export function ProductsProvider({ children }) {
         channelRef.current = null
       }
     }
-  }, [isOnline, user, syncRemote])
+  // ⭐ FIX: quitar syncRemote de las deps. Solo dependemos de isOnline y user.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, user])
 
   // API
   const getProductById = useCallback(
