@@ -4,7 +4,6 @@ import Button from '../common/Button'
 const ACTIONS = [
   { key: 'new-sale',     label: 'Nueva venta',        icon: ShoppingCart,      primary: true },
   { key: 'add-product',  label: 'Agregar producto',   icon: PackagePlus },
-  { key: 'register-buy', label: 'Registrar compra',   icon: Truck },
   { key: 'adjust-inv',   label: 'Ajustar inventario', icon: SlidersHorizontal },
 ]
 

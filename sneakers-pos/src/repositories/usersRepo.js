@@ -61,11 +61,7 @@ export const usersRepo = {
     }
   },
 
-  /**
-   * Crea un usuario nuevo usando la Edge Function (para no cerrar la sesión del admin).
-   */
   async create({ email, password, fullName, phone, roleId, branchId, status = 'active' }) {
-    // 1. Crear usuario en Auth vía Edge Function
     const authResult = await authService.signUpAdmin({
       email,
       password,
@@ -78,10 +74,8 @@ export const usersRepo = {
     const userId = authResult.user?.id
     if (!userId) throw new Error('No se pudo crear el usuario en Auth')
 
-    // 2. Generar employee_id
     const employeeId = await usersService.nextEmployeeId()
 
-    // 3. Actualizar el profile (el trigger ya lo creó, ahora lo completamos)
     const { error: updateError } = await supabase
       .from('profiles')
       .update({
@@ -100,7 +94,6 @@ export const usersRepo = {
       console.warn('⚠️ Usuario creado en Auth, pero no se actualizó profile:', updateError)
     }
 
-    // 4. Guardar en IndexedDB
     const profile = await usersService.getById(userId)
     const mapped = mapFromSupabase(profile)
 
@@ -135,5 +128,23 @@ export const usersRepo = {
     const db = await dbPromise
     await db.delete(STORES.PROFILES, id)
     return true
+  },
+
+  /**
+   * ⭐ NUEVO: obtiene la actividad del usuario combinando sales + audit + sessions.
+   */
+  async getUserActivityMerged(userId) {
+    return await usersService.getUserActivityMerged(userId)
+  },
+
+  /**
+   * ⭐ NUEVO: sesiones desde Supabase.
+   */
+  async getUserSessions(userId) {
+    return await usersService.getUserSessions(userId)
+  },
+
+  async closeSessionRemote(sessionId, reason) {
+    return await usersService.closeSessionRemote(sessionId, reason)
   },
 }

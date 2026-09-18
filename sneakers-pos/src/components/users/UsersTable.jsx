@@ -1,3 +1,4 @@
+// src/components/users/UsersTable.jsx
 import { ArrowUp, ArrowDown, Users as UsersIcon } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -35,6 +36,7 @@ export default function UsersTable({
   onResendInvite,
   onViewRole,
   onViewAudit,
+  onDelete,                                  // ⭐ NUEVO
   onNew,
   searchQuery = '',
   onClearSearch,
@@ -202,6 +204,7 @@ export default function UsersTable({
                           onResendInvite={onResendInvite}
                           onViewRole={onViewRole}
                           onViewAudit={onViewAudit}
+                          onDelete={onDelete}             
                         />
                       </td>
                     </tr>
@@ -244,6 +247,7 @@ export default function UsersTable({
                       onResendInvite={onResendInvite}
                       onViewRole={onViewRole}
                       onViewAudit={onViewAudit}
+                      onDelete={onDelete}                   
                     />
                   </div>
 

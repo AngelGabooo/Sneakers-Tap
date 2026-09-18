@@ -1,8 +1,10 @@
+// src/components/users/UsersRowActions.jsx
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  MoreHorizontal, Eye, Pencil, Activity, Monitor, ToggleLeft,
+  MoreHorizontal, Eye, Pencil, Activity, Monitor,
   KeyRound, Mail, Shield, History, Ban, CheckCircle, XCircle,
+  Trash2,                                    // ⭐ NUEVO
 } from 'lucide-react'
 
 export default function UsersRowActions({
@@ -16,24 +18,23 @@ export default function UsersRowActions({
   onResendInvite,
   onViewRole,
   onViewAudit,
+  onDelete,                                  // ⭐ NUEVO
 }) {
   const [open, setOpen] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 })
   const buttonRef = useRef(null)
   const menuRef = useRef(null)
 
-  // Calcula la posición del menú cuando se abre
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return
     const rect = buttonRef.current.getBoundingClientRect()
     const menuWidth = 220
     const margin = 8
 
-    // Decide si abrir hacia abajo o hacia arriba
     const spaceBelow = window.innerHeight - rect.bottom
     const openUp = spaceBelow < 300
 
-    let left = rect.right - menuWidth // alinea a la derecha
+    let left = rect.right - menuWidth
     if (left < margin) left = margin
     if (left + menuWidth > window.innerWidth - margin) {
       left = window.innerWidth - menuWidth - margin
@@ -47,7 +48,6 @@ export default function UsersRowActions({
     })
   }, [open])
 
-  // Cierra el menú al hacer scroll, resize o click fuera
   useEffect(() => {
     if (!open) return
 
@@ -78,6 +78,7 @@ export default function UsersRowActions({
   const status = user?.status || 'active'
   const items = []
 
+  // Acciones principales
   items.push({ key: 'profile', label: 'Ver perfil', icon: Eye, onClick: () => onViewProfile?.(user) })
   items.push({ key: 'edit', label: 'Editar empleado', icon: Pencil, onClick: () => onEdit?.(user) })
 
@@ -87,7 +88,7 @@ export default function UsersRowActions({
   } else {
     items.push({ key: 'activity', label: 'Ver actividad', icon: Activity, onClick: () => onViewActivity?.(user) })
     items.push({ key: 'sessions', label: 'Ver sesiones', icon: Monitor, onClick: () => onViewSessions?.(user) })
-    items.push({ key: 'status', label: 'Cambiar estado', icon: ToggleLeft, onClick: () => onChangeStatus?.(user, 'toggle') })
+    // ❌ QUITADO: "Cambiar estado" (toggle)
     items.push({ key: 'reset', label: 'Restablecer acceso', icon: KeyRound, onClick: () => onResetAccess?.(user) })
   }
 
@@ -101,6 +102,15 @@ export default function UsersRowActions({
 
   items.push({ key: 'role', label: 'Ver rol y permisos', icon: Shield, onClick: () => onViewRole?.(user) })
   items.push({ key: 'audit', label: 'Ver auditoría', icon: History, onClick: () => onViewAudit?.(user) })
+
+  // ⭐ NUEVO: Eliminar siempre al final, en rojo
+  items.push({
+    key: 'delete',
+    label: 'Eliminar empleado',
+    icon: Trash2,
+    danger: true,
+    onClick: () => onDelete?.(user),
+  })
 
   return (
     <>

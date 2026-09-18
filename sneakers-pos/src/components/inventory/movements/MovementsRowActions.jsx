@@ -12,8 +12,6 @@ export default function MovementsRowActions({
     >
       <DropdownItem icon={Eye}      onClick={onViewDetail}>Ver detalle</DropdownItem>
       <DropdownItem icon={Package}  onClick={onViewProduct}>Ver producto</DropdownItem>
-      <DropdownItem icon={FileText} onClick={onViewDocument}>Ver documento</DropdownItem>
-      <DropdownItem icon={User}     onClick={onViewUser}>Ver usuario</DropdownItem>
-    </Dropdown>
+¿¿    </Dropdown>
   )
 }

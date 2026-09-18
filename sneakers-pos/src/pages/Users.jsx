@@ -8,6 +8,7 @@ import UsersToolbar from '../components/users/UsersToolbar'
 import UsersQuickFilters from '../components/users/UsersQuickFilters'
 import UsersBulkBar from '../components/users/UsersBulkBar'
 import UsersTable from '../components/users/UsersTable'
+import ConfirmModal from '../components/common/ConfirmModal'          // ⭐ NUEVO
 import { useView } from '../context/ViewContext'
 import { useUsers } from '../context/UsersContext'
 import { useAuth } from '../context/AuthContext'
@@ -19,6 +20,7 @@ export default function Users() {
   const {
     users, loading,
     changeStatus, resetAccess, logActivity,
+    deleteUser,                                                        // ⭐ NUEVO
   } = useUsers()
 
   const [search, setSearch] = useState('')
@@ -28,6 +30,8 @@ export default function Users() {
   const [perPage, setPerPage] = useState(10)
   const [sort, setSort] = useState({ field: 'name', direction: 'asc' })
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)               // ⭐ NUEVO
+  const [deleting, setDeleting] = useState(false)                      // ⭐ NUEVO
 
   const metrics = useMemo(() => computeMetrics(users), [users])
   const activitySummary = useMemo(() => computeActivitySummary(users), [users])
@@ -173,6 +177,38 @@ export default function Users() {
     navigate('audit', { user: user.fullName })
   }
 
+  /* ------------------------------------------------------- */
+  /* ⭐ NUEVO: Eliminar empleado                               */
+  /* ------------------------------------------------------- */
+
+  const handleDelete = (user) => {
+    // No permitir eliminarse a sí mismo
+    if (user.id === currentUser?.id) {
+      window.alert('No puedes eliminar tu propio usuario.')
+      return
+    }
+    setDeleteTarget(user)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await deleteUser(deleteTarget.id)
+      logActivity(deleteTarget.id, {
+        type: 'delete',
+        label: 'Usuario eliminado permanentemente',
+        by: currentUser?.name || 'Administrador',
+      })
+      setDeleting(false)
+      setDeleteTarget(null)
+    } catch (err) {
+      console.error('❌ Error eliminando usuario:', err)
+      setDeleting(false)
+      window.alert('Error al eliminar: ' + err.message)
+    }
+  }
+
   return (
     <DashboardLayout activeKey="users" onNavigate={handleNavigate}>
       <UsersHeader onNew={handleNew} onExport={handleExport} />
@@ -263,6 +299,7 @@ export default function Users() {
         onResendInvite={handleResendInvite}
         onViewRole={handleViewRole}
         onViewAudit={handleViewAudit}
+        onDelete={handleDelete}                                        
         onNew={handleNew}
         searchQuery={search}
         onClearSearch={() => { setSearch(''); setQuickFilter('all') }}
@@ -271,6 +308,23 @@ export default function Users() {
         total={total}
         onPageChange={setPage}
         onPerPageChange={(n) => { setPerPage(n); setPage(1) }}
+      />
+
+      {/* ⭐ NUEVO: Modal de confirmación para eliminar */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="¿Eliminar empleado permanentemente?"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.fullName}" será eliminado junto con su historial de ventas, sesiones y auditoría. Esta acción NO se puede deshacer.`
+            : ''
+        }
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        tone="danger"
+        loading={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => !deleting && setDeleteTarget(null)}
       />
     </DashboardLayout>
   )

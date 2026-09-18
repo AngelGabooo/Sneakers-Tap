@@ -18,7 +18,6 @@ export default function InventoryRowActions({
       <DropdownItem icon={Pencil}            onClick={onEdit}>Editar producto</DropdownItem>
       <DropdownItem icon={History}           onClick={onViewMovements}>Ver movimientos</DropdownItem>
       <DropdownItem icon={SlidersHorizontal} onClick={onAdjustStock}>Ajustar stock</DropdownItem>
-      <DropdownItem icon={ShoppingBag}       onClick={onRegisterPurchase}>Registrar compra</DropdownItem>
     </Dropdown>
   )
 }

@@ -21,8 +21,6 @@ export default function AlertsRowActions({
       <DropdownItem icon={Warehouse}         onClick={onViewInventory}>Ver inventario</DropdownItem>
       <DropdownItem icon={History}           onClick={onViewMovements}>Ver movimientos</DropdownItem>
       <DropdownItem icon={SlidersHorizontal} onClick={onAdjustStock}>Ajustar inventario</DropdownItem>
-      <DropdownItem icon={ShoppingBag}       onClick={onCreatePurchase}>Crear compra</DropdownItem>
-      <DropdownItem icon={UserCog}           onClick={onViewSupplier}>Ver proveedor</DropdownItem>
-    </Dropdown>
+¿    </Dropdown>
   )
 }

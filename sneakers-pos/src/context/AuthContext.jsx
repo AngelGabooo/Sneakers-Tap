@@ -4,13 +4,17 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react'
 import { authService } from '../services/authService'
 import { profilesService } from '../services/profilesService'
+import { usersService } from '../services/usersService'
 import { getPushStatus, subscribeToPush } from '../utils/webPush'
 
 const AuthContext = createContext(null)
+
+const SESSION_KEY = 'sneakers-current-session-id'
 
 /**
  * Mapea un perfil de Supabase a la estructura que usa la app.
@@ -33,9 +37,32 @@ function mapProfileToUser(profile, authUser) {
   }
 }
 
+/**
+ * Detecta el tipo de dispositivo a partir del user agent.
+ */
+function detectDevice(ua) {
+  if (!ua) return 'Desconocido'
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua)
+  const browser =
+    /Edg\//.test(ua) ? 'Edge'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari'
+    : 'Navegador'
+  const os =
+    /Windows/.test(ua) ? 'Windows'
+    : /Mac OS/.test(ua) ? 'macOS'
+    : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad/.test(ua) ? 'iOS'
+    : /Linux/.test(ua) ? 'Linux'
+    : ''
+  return `${browser}${os ? ` · ${os}` : ''}`
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const sessionIdRef = useRef(null)
 
   /**
    * Carga el perfil completo del usuario autenticado.
@@ -49,7 +76,6 @@ export function AuthProvider({ children }) {
     try {
       const profile = await profilesService.getById(authUser.id)
 
-      // Verificar estado de la cuenta
       if (['inactive', 'suspended', 'blocked', 'pending'].includes(profile.status)) {
         const messages = {
           inactive: 'Tu cuenta está desactivada. Contacta al administrador.',
@@ -74,6 +100,52 @@ export function AuthProvider({ children }) {
   }, [])
 
   /**
+   * ⭐ Registra una nueva sesión en Supabase.
+   *    Guarda el sessionId para poder cerrarla en logout.
+   */
+  const startSession = useCallback(async (userId) => {
+    try {
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : null
+      const device = detectDevice(ua)
+
+      const session = await usersService.startSession({
+        userId,
+        device,
+        userAgent: ua,
+        ip: null, // no lo tenemos desde el cliente
+      })
+
+      if (session?.id) {
+        sessionIdRef.current = session.id
+        try { sessionStorage.setItem(SESSION_KEY, session.id) } catch {}
+        console.log('🟢 Sesión registrada:', session.id, '·', device)
+      }
+    } catch (err) {
+      console.warn('⚠️ No se pudo registrar la sesión:', err.message)
+    }
+  }, [])
+
+  /**
+   * ⭐ Cierra la sesión activa en Supabase.
+   */
+  const endSession = useCallback(async (reason = 'Logout') => {
+    try {
+      let sessionId = sessionIdRef.current
+      if (!sessionId) {
+        try { sessionId = sessionStorage.getItem(SESSION_KEY) } catch {}
+      }
+      if (!sessionId) return
+
+      await usersService.endSession(sessionId, reason)
+      sessionIdRef.current = null
+      try { sessionStorage.removeItem(SESSION_KEY) } catch {}
+      console.log('🔴 Sesión cerrada:', reason)
+    } catch (err) {
+      console.warn('⚠️ No se pudo cerrar la sesión:', err.message)
+    }
+  }, [])
+
+  /**
    * Login.
    */
   const login = useCallback(async ({ email, password }) => {
@@ -91,6 +163,9 @@ export function AuthProvider({ children }) {
         return { ok: false, error: result.error }
       }
 
+      // ⭐ NUEVO: registrar sesión
+      await startSession(authUser.id)
+
       // Actualizar last_access en background
       profilesService.touchLastAccess(authUser.id).catch(() => {})
 
@@ -98,19 +173,21 @@ export function AuthProvider({ children }) {
     } catch (err) {
       return { ok: false, error: err.message || 'Error al iniciar sesión.' }
     }
-  }, [loadProfile])
+  }, [loadProfile, startSession])
 
   /**
    * Logout.
    */
   const logout = useCallback(async () => {
     try {
+      // ⭐ NUEVO: cerrar la sesión ANTES de signOut
+      await endSession('Logout manual')
       await authService.signOut()
     } catch (err) {
       console.warn('Error al cerrar sesión:', err)
     }
     setUser(null)
-  }, [])
+  }, [endSession])
 
   /**
    * Refrescar perfil manualmente.
@@ -133,6 +210,19 @@ export function AuthProvider({ children }) {
 
         if (session?.user) {
           await loadProfile(session.user)
+
+          // ⭐ Si había una sesión abierta en sessionStorage,
+          //    significa que el usuario recargó. La reusamos.
+          let existingSessionId = null
+          try { existingSessionId = sessionStorage.getItem(SESSION_KEY) } catch {}
+
+          if (existingSessionId) {
+            sessionIdRef.current = existingSessionId
+            console.log('♻️ Reusando sesión existente:', existingSessionId)
+          } else {
+            // No hay sesión previa (recarga con sesión perdida) → crear nueva
+            await startSession(session.user.id)
+          }
         } else {
           setUser(null)
         }
@@ -146,12 +236,17 @@ export function AuthProvider({ children }) {
 
     init()
 
-    // Escuchar cambios de sesión (login, logout, refresh)
+    // Escuchar cambios de sesión
     const { data: { subscription } } = authService.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return
+
         if (event === 'SIGNED_OUT') {
           setUser(null)
+          // ⭐ Cerrar sesión activa si aún no se cerró
+          if (sessionIdRef.current) {
+            await endSession('Sesión cerrada desde otro dispositivo')
+          }
         } else if (event === 'SIGNED_IN' && session?.user) {
           await loadProfile(session.user)
         }
@@ -162,11 +257,51 @@ export function AuthProvider({ children }) {
       mounted = false
       subscription?.unsubscribe()
     }
-  }, [loadProfile])
+  }, [loadProfile, startSession, endSession])
 
-  // ⭐ NUEVO: auto-sanación de suscripción push
-  // Si el usuario ya dio permiso pero la suscripción se perdió
-  // (pasa en Android/Chrome y al reinstalar la PWA en iOS), la renovamos.
+  /**
+   * ⭐ Al cerrar/recargar la pestaña, marcar la sesión como cerrada.
+   *    Usamos 'beforeunload' para intentar cerrarla.
+   *    Nota: no es 100% confiable en móviles, pero ayuda.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleBeforeUnload = () => {
+      const sessionId = sessionIdRef.current
+      if (!sessionId) return
+
+      // Usamos sendBeacon para asegurar que el request salga.
+      // Si no, no se alcanza a hacer.
+      try {
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_sessions?id=eq.${sessionId}`
+        const body = JSON.stringify({
+          ended_at: new Date().toISOString(),
+          end_reason: 'Cierre de navegador',
+        })
+        const blob = new Blob([body], { type: 'application/json' })
+
+        // ⚠️ sendBeacon no permite custom headers. Fallback a fetch.
+        //    fetch con keepalive sí permite headers.
+        fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Prefer': 'return=minimal',
+          },
+          body,
+          keepalive: true,
+        }).catch(() => {})
+      } catch {}
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
+  // Auto-sanación de suscripción push
   useEffect(() => {
     if (!user?.id) return
     if (typeof window === 'undefined') return
@@ -178,8 +313,6 @@ export function AuthProvider({ children }) {
       try {
         const status = await getPushStatus()
         if (!alive) return
-
-        // Caso típico: permiso concedido, pero sin suscripción activa
         if (status === 'granted') {
           console.log('🔄 Push sin suscripción activa, renovando…')
           await subscribeToPush(user.id)
