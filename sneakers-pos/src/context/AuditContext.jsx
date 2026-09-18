@@ -2,6 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { auditRepo } from '../repositories/auditRepo'
 import { useNetwork } from './NetworkContext'
+import { useAuth } from './AuthContext'                  // ⭐ NUEVO
+import { supabase } from '../lib/supabase'               // ⭐ NUEVO
 
 const AuditContext = createContext(null)
 
@@ -59,10 +61,12 @@ function getPeriodRange(period, customFrom, customTo) {
 
 export function AuditProvider({ children }) {
   const { isOnline } = useNetwork()
+  const { user } = useAuth()                              // ⭐ NUEVO
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const mountedRef = useRef(true)
+  const channelRef = useRef(null)                         // ⭐ NUEVO
 
   const [search, setSearch] = useState('')
   const [period, setPeriod] = useState('last30')
@@ -118,6 +122,47 @@ export function AuditProvider({ children }) {
     const timer = setTimeout(() => syncRemote(), 2000)
     return () => clearTimeout(timer)
   }, [isOnline, syncRemote])
+
+  // ⭐ ============================================================
+  // ⭐ REALTIME: escucha cambios en `audit_log` para actualizar en vivo
+  // ============================================================
+  useEffect(() => {
+    if (!isOnline) return
+    if (!user) return
+
+    let debounceTimer = null
+    const scheduleRefresh = (reason) => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(async () => {
+        console.log(`🔄 Realtime audit → syncRemote (${reason})`)
+        await syncRemote()
+      }, 800)
+    }
+
+    const channel = supabase
+      .channel('audit-realtime-' + Date.now())
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'audit_log' },
+        (payload) => {
+          console.log('📋 Realtime audit INSERT:', payload.new?.action)
+          scheduleRefresh('audit_log INSERT')
+        },
+      )
+      .subscribe((status) => {
+        console.log('📡 Realtime audit status:', status)
+      })
+
+    channelRef.current = channel
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [isOnline, user, syncRemote])
 
   // Filtros
   const filteredEvents = useMemo(() => {

@@ -15,11 +15,29 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    storageKey: 'sneakers-auth',          // ⭐ Storage key único
+    flowType: 'pkce',                     // ⭐ Mejor seguridad para SPA
   },
   realtime: {
     params: {
-      // ⭐ Limita eventos por segundo para no saturar (default: 10)
       eventsPerSecond: 10,
     },
   },
+})
+
+// ⭐ Detectar eventos de auth para debug
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'TOKEN_REFRESHED') {
+    console.log('🔄 Token refrescado')
+  }
+  if (event === 'SIGNED_OUT') {
+    console.log('🚪 Sesión cerrada')
+    // Limpiar storages
+    try {
+      localStorage.removeItem('sneakers-notifications-cache')
+    } catch {}
+  }
+  if (event === 'SIGNED_IN') {
+    console.log('✅ Sesión iniciada:', session?.user?.email)
+  }
 })

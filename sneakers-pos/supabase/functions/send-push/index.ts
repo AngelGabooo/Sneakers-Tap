@@ -3,8 +3,8 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import webpush from 'https://esm.sh/web-push@3.6.7'
 
-const VAPID_PUBLIC = Deno.env.get('VAPID_PUBLIC_KEY')!
-const VAPID_PRIVATE = Deno.env.get('VAPID_PRIVATE_KEY')!
+const VAPID_PUBLIC = Deno.env.get('VAPID_PUBLIC')!
+const VAPID_PRIVATE = Deno.env.get('VAPID_PRIVATE')!
 const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@sneakers.com'
 
 const APP_ORIGIN = 'https://sneakers-tap.vercel.app'
