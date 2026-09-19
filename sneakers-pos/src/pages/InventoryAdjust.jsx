@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, ShieldOff } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
-import Card from '../components/common/Card'
 import Button from '../components/common/Button'
-import EmptyState from '../components/common/EmptyState'
 import Toast from '../components/common/Toast'
 import AdjustHeader from '../components/inventory/adjust/AdjustHeader'
 import AdjustControlNotice from '../components/inventory/adjust/AdjustControlNotice'
@@ -22,34 +20,17 @@ import { useAuth } from '../context/AuthContext'
 import { useProducts } from '../context/ProductsContext'
 import { useMovements } from '../context/MovementsContext'
 
-const LOCATIONS = [
-  { value: 'store',    label: 'Tienda principal' },
-  { value: 'warehouse',label: 'Almacén' },
-  { value: 'stock',    label: 'Bodega' },
-]
-
-const REASON_LABELS = {
-  physical:   'Conteo físico',
-  reception:  'Recepción de mercancía',
-  return:     'Devolución de cliente',
-  damage:     'Daño',
-  shrinkage:  'Merma',
-  loss:       'Pérdida',
-  correction: 'Corrección',
-  error:      'Error de captura',
-  initial:    'Inventario inicial',
-  transfer:   'Transferencia',
-  other:      'Otro',
-}
+// 👇 Constantes fijas: una sola tienda y un solo motivo
+const FIXED_LOCATION = 'Tienda principal'
+const FIXED_REASON = 'error'
+const FIXED_REASON_LABEL = 'Error de captura'
 
 const INITIAL_FORM = {
   productId: null,
   variantId: null,
-  location: '',
   type: 'in',
   quantity: '',
   adjustMode: 'new',
-  reason: '',
   documentRef: '',
   notes: '',
 }
@@ -68,7 +49,7 @@ export default function InventoryAdjust() {
   const [toast, setToast] = useState(null)
   const [dirty, setDirty] = useState(false)
 
-  // Preselección desde viewParams (ej. llegas desde Inventario o Detalle con { id, variantId })
+  // Preselección desde viewParams
   useEffect(() => {
     if (viewParams?.id && !form.productId) {
       setForm((f) => ({
@@ -98,12 +79,11 @@ export default function InventoryAdjust() {
 
   const stockAfter = Math.max(0, (Number(selectedVariant?.stock) || 0) + delta)
 
-  // Validación
+  // Validación (sin location ni reason)
   const validate = () => {
     const e = {}
     if (!form.productId) e.productId = 'Selecciona un producto.'
     if (!form.variantId) e.variantId = 'Selecciona una variante.'
-    if (!form.location) e.location = 'Selecciona una ubicación.'
     if (!form.type) e.type = 'Selecciona un tipo de movimiento.'
     const q = Number(form.quantity)
     if (!form.quantity || isNaN(q) || q <= 0) {
@@ -112,7 +92,6 @@ export default function InventoryAdjust() {
     if (form.type === 'out' && q > (Number(selectedVariant?.stock) || 0)) {
       e.quantity = 'No puedes retirar más unidades que el stock disponible.'
     }
-    if (!form.reason) e.reason = 'Selecciona un motivo.'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -122,10 +101,8 @@ export default function InventoryAdjust() {
     return (
       form.productId &&
       form.variantId &&
-      form.location &&
       form.type &&
       q > 0 &&
-      form.reason &&
       !(form.type === 'out' && q > (Number(selectedVariant?.stock) || 0))
     )
   }
@@ -163,13 +140,13 @@ export default function InventoryAdjust() {
     setSubmitting(true)
 
     setTimeout(() => {
-      // 1) Actualiza stock
+      // 1) Actualizar stock de la variante
       const nextVariants = (selectedProduct.variants || []).map((v) =>
         v.id === selectedVariant.id ? { ...v, stock: stockAfter } : v,
       )
       updateProduct(selectedProduct.id, { variants: nextVariants })
 
-      // 2) Registra movimiento inmutable
+      // 2) Registrar movimiento (con valores FIJOS de location y reason)
       const movement = registerMovement({
         productId: selectedProduct.id,
         productName: selectedProduct.name,
@@ -182,9 +159,9 @@ export default function InventoryAdjust() {
         stockAfter,
         quantity: delta,
         type: form.type,
-        reason: form.reason,
+        reason: FIXED_REASON,           // 👈 siempre 'error'
         note: form.notes,
-        location: LOCATIONS.find((l) => l.value === form.location)?.label || form.location,
+        location: FIXED_LOCATION,        // 👈 siempre 'Tienda principal'
         documentId: form.documentRef || '',
         documentType: form.documentRef ? 'manual' : '',
       })
@@ -221,7 +198,7 @@ export default function InventoryAdjust() {
         stockBefore: Number(selectedVariant.stock) || 0,
         delta,
         stockAfter,
-        reasonLabel: REASON_LABELS[form.reason] || '—',
+        reasonLabel: FIXED_REASON_LABEL,   // 👈 siempre 'Error de captura'
       }
     : null
 
@@ -254,18 +231,15 @@ export default function InventoryAdjust() {
       <AdjustControlNotice />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Formulario principal */}
+        {/* Formulario */}
         <div className="lg:col-span-2 space-y-5">
           <AdjustProductSection
             products={products}
             selectedProductId={form.productId}
             selectedVariantId={form.variantId}
-            location={form.location}
-            locations={LOCATIONS}
             errors={errors}
             onSelectProduct={handleSelectProduct}
             onSelectVariant={handleSelectVariant}
-            onChangeLocation={(v) => handleChange('location', v)}
           />
 
           {selectedVariant && (
@@ -292,16 +266,12 @@ export default function InventoryAdjust() {
           />
 
           <AdjustReasonSection
-            reason={form.reason}
-            onReasonChange={(v) => handleChange('reason', v)}
             documentRef={form.documentRef}
             onDocumentRefChange={(v) => handleChange('documentRef', v)}
             notes={form.notes}
             onNotesChange={(v) => handleChange('notes', v)}
-            errors={errors}
           />
 
-          {/* Acciones inferiores */}
           <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={handleCancel}>
               Cancelar
@@ -322,7 +292,7 @@ export default function InventoryAdjust() {
           <AdjustSummaryPanel
             product={selectedProduct}
             variant={selectedVariant}
-            location={LOCATIONS.find((l) => l.value === form.location)?.label}
+            location={FIXED_LOCATION}       // 👈 siempre 'Tienda principal'
             type={form.type}
             quantity={form.quantity}
             adjustMode={form.adjustMode}
@@ -335,7 +305,6 @@ export default function InventoryAdjust() {
         </aside>
       </div>
 
-      {/* Modal de confirmación */}
       <AdjustConfirmModal
         open={confirmOpen}
         data={confirmData}
@@ -344,7 +313,6 @@ export default function InventoryAdjust() {
         submitting={submitting}
       />
 
-      {/* Toast de éxito */}
       <AdjustSuccessToast
         open={!!successMovement}
         movement={successMovement}

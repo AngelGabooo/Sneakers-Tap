@@ -8,11 +8,48 @@ import VariantsLabelPrintModal from './VariantsLabelPrintModal'
 const SIZE_OPTIONS = ['25', '26', '27', '28', '29', '30']
 const COLOR_OPTIONS = ['Negro', 'Blanco', 'Gris', 'Rojo']
 
+// Mapa de colores predefinidos → hex
 const COLOR_MAP = {
   Negro:  '#111827',
   Blanco: '#FFFFFF',
   Gris:   '#9CA3AF',
   Rojo:   '#DC2626',
+}
+
+/**
+ * Paleta de colores disponibles para colores personalizados.
+ * Se asignan de forma determinista por hash del nombre.
+ */
+const CUSTOM_COLOR_PALETTE = [
+  '#1E40AF', // azul marino
+  '#0891B2', // cyan
+  '#047857', // verde oscuro
+  '#65A30D', // verde lima
+  '#CA8A04', // mostaza
+  '#EA580C', // naranja
+  '#BE185D', // rosa
+  '#7C3AED', // violeta
+  '#78350F', // café
+  '#A16207', // dorado
+  '#0F766E', // teal
+  '#4338CA', // índigo
+  '#B45309', // ámbar
+  '#15803D', // verde
+  '#831843', // vino
+  '#1F2937', // gris oscuro
+]
+
+/**
+ * Devuelve un color HEX determinista para un nombre de color.
+ */
+function getColorHex(name) {
+  if (COLOR_MAP[name]) return COLOR_MAP[name]
+  if (!name) return '#ccc'
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0
+  }
+  return CUSTOM_COLOR_PALETTE[hash % CUSTOM_COLOR_PALETTE.length]
 }
 
 /**
@@ -48,17 +85,21 @@ export function buildVariantBarcode(sku) {
 }
 
 export default function ProductVariantsSection({
-  variantsBySize = {},           // 👈 NUEVO modelo: { '25': ['Negro'], '26': ['Negro','Blanco'] }
-  variants = [],                 // array plano final (para imprimir, guardar, etc.)
+  variantsBySize = {},
+  variants = [],
   baseSku = '',
   codeType = 'barcode',
   productName = '',
   productPrice = '',
-  onChangeVariantsBySize,        // 👈 NUEVO handler
-  onChangeVariantsBulk,          // sigue igual: recibe un array nuevo
+  onChangeVariantsBySize,
+  onChangeVariantsBulk,
 }) {
   const [newSize, setNewSize] = useState('')
   const [printOpen, setPrintOpen] = useState(false)
+
+  // Estado para el input de color personalizado por talla
+  // { [size]: string }
+  const [customColorBySize, setCustomColorBySize] = useState({})
 
   const sizes = Object.keys(variantsBySize)
 
@@ -69,13 +110,12 @@ export default function ProductVariantsSection({
     if (!size || variantsBySize[size]) return
     onChangeVariantsBySize?.({
       ...variantsBySize,
-      [size]: [],   // talla nueva sin colores asignados
+      [size]: [],
     })
   }
 
   const toggleSizeOption = (size) => {
     if (variantsBySize[size]) {
-      // Eliminar talla completa
       const next = { ...variantsBySize }
       delete next[size]
       onChangeVariantsBySize?.(next)
@@ -118,10 +158,52 @@ export default function ProductVariantsSection({
     })
   }
 
+  const addCustomColorToSize = (size) => {
+    const raw = (customColorBySize[size] || '').trim()
+    if (!raw) return
+
+    // Normaliza: primera letra mayúscula, resto minúscula (excepto si son siglas)
+    const normalized = raw
+      .split(' ')
+      .map((word) =>
+        word.length > 3
+          ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+          : word.toUpperCase()
+      )
+      .join(' ')
+
+    const current = variantsBySize[size] || []
+    if (current.includes(normalized)) {
+      // Ya existe → limpia el input
+      setCustomColorBySize((prev) => ({ ...prev, [size]: '' }))
+      return
+    }
+
+    onChangeVariantsBySize?.({
+      ...variantsBySize,
+      [size]: [...current, normalized],
+    })
+    setCustomColorBySize((prev) => ({ ...prev, [size]: '' }))
+  }
+
+  const removeCustomColorFromSize = (size, color) => {
+    const current = variantsBySize[size] || []
+    onChangeVariantsBySize?.({
+      ...variantsBySize,
+      [size]: current.filter((c) => c !== color),
+    })
+  }
+
+  const handleCustomColorKeyDown = (e, size) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      addCustomColorToSize(size)
+    }
+  }
+
   // -------------------------------------------------------------
   // Stock
   // -------------------------------------------------------------
-  // Stock "compartido" por talla (solo si todos los colores de la talla tienen el mismo stock)
   const stockBySize = {}
   sizes.forEach((size) => {
     const colorsInSize = variantsBySize[size] || []
@@ -200,7 +282,7 @@ export default function ProductVariantsSection({
           </div>
         )}
 
-        {/* Tallas — solo para añadir */}
+        {/* Tallas */}
         <div className="mb-5">
           <p className="text-sm font-medium text-brand-black dark:text-dark-text mb-2">
             Agregar tallas
@@ -257,12 +339,17 @@ export default function ProductVariantsSection({
 
             {sizes.map((size) => {
               const colorsInSize = variantsBySize[size] || []
+              const predefinedActive = COLOR_OPTIONS.filter((c) => colorsInSize.includes(c))
+              const customActive = colorsInSize.filter((c) => !COLOR_OPTIONS.includes(c))
+              const inputValue = customColorBySize[size] || ''
+
               return (
                 <div
                   key={size}
                   className="rounded-lg border border-gray-200 dark:border-dark-border p-4 bg-gray-50/50 dark:bg-dark-surface/40"
                 >
-                  <div className="flex items-center justify-between gap-3 mb-3">
+                  {/* Header de la talla */}
+                  <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center justify-center h-8 min-w-[44px] px-3 rounded-md bg-brand-blue text-white text-sm font-bold">
                         {size}
@@ -300,6 +387,7 @@ export default function ProductVariantsSection({
                     </div>
                   </div>
 
+                  {/* Colores predefinidos */}
                   <div className="flex flex-wrap gap-2">
                     {COLOR_OPTIONS.map((c) => {
                       const active = colorsInSize.includes(c)
@@ -326,6 +414,75 @@ export default function ProductVariantsSection({
                       )
                     })}
                   </div>
+
+                  {/* Agregar color personalizado */}
+                  {baseSku && (
+                    <div className="mt-3 flex items-center gap-2 max-w-md">
+                      <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) =>
+                          setCustomColorBySize((prev) => ({ ...prev, [size]: e.target.value }))
+                        }
+                        onKeyDown={(e) => handleCustomColorKeyDown(e, size)}
+                        placeholder="Otro color (ej. Azul marino)"
+                        className="
+                          flex-1 h-8 px-3 rounded-lg text-xs
+                          bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
+                          border border-gray-200 dark:border-dark-border
+                          focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
+                          outline-none
+                        "
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addCustomColorToSize(size)}
+                        disabled={!inputValue.trim()}
+                        className="
+                          inline-flex items-center gap-1 h-8 px-3 rounded-lg text-xs font-medium
+                          bg-white dark:bg-dark-card text-brand-blue
+                          border border-gray-200 dark:border-dark-border
+                          hover:border-brand-blue hover:bg-blue-50 dark:hover:bg-blue-950/30
+                          disabled:opacity-40 disabled:cursor-not-allowed
+                          transition-colors
+                        "
+                      >
+                        <Plus size={12} strokeWidth={2.2} />
+                        Agregar color
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Colores personalizados agregados */}
+                  {customActive.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {customActive.map((c) => (
+                        <span
+                          key={c}
+                          className="
+                            inline-flex items-center gap-2 h-8 pl-3 pr-2 rounded-lg text-xs font-medium
+                            bg-brand-blue/10 dark:bg-brand-blue/20
+                            text-brand-blue
+                            border border-brand-blue/30
+                          "
+                        >
+                          <span
+                            className="w-3 h-3 rounded-full border border-black/10"
+                            style={{ backgroundColor: getColorHex(c) }}
+                          />
+                          {c}
+                          <button
+                            type="button"
+                            onClick={() => removeCustomColorFromSize(size, c)}
+                            className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-brand-blue/20 transition-colors"
+                            aria-label={`Quitar ${c}`}
+                          >
+                            <X size={10} strokeWidth={2.5} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -443,7 +600,13 @@ export default function ProductVariantsSection({
                       className="border-b border-gray-100 dark:border-dark-border last:border-0"
                     >
                       <td className="px-3 py-2 text-brand-black dark:text-dark-text font-medium whitespace-nowrap">
-                        {v.label}
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full border border-black/10 shrink-0"
+                            style={{ backgroundColor: getColorHex(v.color) }}
+                          />
+                          {v.label}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-gray-700 dark:text-dark-muted text-xs font-mono whitespace-nowrap">
                         {v.sku || '—'}

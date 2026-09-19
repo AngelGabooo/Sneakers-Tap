@@ -2,10 +2,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   MessageCircle, HelpCircle, AlertTriangle, Bug, Lightbulb,
-  Wrench, Shield, ChevronRight, Send, Clock, Zap, Headphones,
+  Wrench, Shield, ChevronRight, Send, Clock,
   ExternalLink, Terminal, Cpu, Activity, CheckCircle2, Wifi,
   Smartphone, Monitor, Copy, Check, GitBranch, Rocket,
-  Package, Database, Server, CircleDot,
+  Package, Database, CircleDot, Sparkles, Headphones,
 } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Card from '../components/common/Card'
@@ -19,7 +19,6 @@ const WHATSAPP_NUMBER = '3349812319'
 const WHATSAPP_COUNTRY = '52'
 const APP_VERSION = '2.4.0'
 const BUILD_DATE = '2026-09-18'
-const GITHUB_URL = 'https://github.com/biomey/sneakers-pos'
 
 const REASONS = [
   { key: 'bug',        label: 'Algo no funciona',      icon: Bug,           desc: 'Errores o comportamientos raros' },
@@ -97,7 +96,6 @@ export default function Support() {
   const [copied, setCopied] = useState(false)
   const [uptime, setUptime] = useState(0)
 
-  // ⭐ Uptime en vivo
   useEffect(() => {
     const start = Date.now()
     const timer = setInterval(() => {
@@ -195,101 +193,112 @@ export default function Support() {
       </nav>
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* HERO TERMINAL                                                 */}
+      {/* HERO CLARO                                                     */}
       {/* ══════════════════════════════════════════════════════════════ */}
       <Card className="!p-0 overflow-hidden mb-6">
-        <div className="relative bg-[#0a0e27]">
-          {/* Grid background */}
+        <div className="relative bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-blue-950/30 dark:via-dark-card dark:to-purple-950/30">
+          {/* Patrón decorativo suave */}
           <div
-            className="absolute inset-0 opacity-30"
+            className="absolute inset-0 opacity-[0.4] dark:opacity-20"
             style={{
-              backgroundImage: `
-                linear-gradient(rgba(59,130,246,0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(59,130,246,0.1) 1px, transparent 1px)
-              `,
-              backgroundSize: '32px 32px',
+              backgroundImage: `radial-gradient(circle at 1px 1px, rgb(59 130 246 / 0.15) 1px, transparent 0)`,
+              backgroundSize: '24px 24px',
             }}
           />
 
-          {/* Glow top right */}
-          <div
-            className="absolute -top-32 -right-32 w-96 h-96 rounded-full opacity-20"
-            style={{ background: 'radial-gradient(circle, #3b82f6, transparent 70%)' }}
-          />
-          <div
-            className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full opacity-15"
-            style={{ background: 'radial-gradient(circle, #8b5cf6, transparent 70%)' }}
-          />
-
-          {/* Contenido */}
           <div className="relative p-6 lg:p-8">
-            {/* Barra de ventana */}
-            <div className="flex items-center gap-2 mb-6">
-              <div className="flex gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
-                <div className="w-3 h-3 rounded-full bg-green-500/80" />
-              </div>
-              <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-mono text-blue-300/60">
-                <Terminal size={11} />
-                <span>biomey@sneakers:~/support</span>
-              </div>
-              <div className="text-[10px] font-mono text-blue-300/60">v{APP_VERSION}</div>
-            </div>
-
             <div className="flex items-start justify-between gap-6 flex-wrap">
               <div className="min-w-0 flex-1">
-                {/* Línea de comando */}
-                <div className="font-mono text-sm mb-3 flex items-center gap-2">
-                  <span className="text-green-400">$</span>
-                  <span className="text-blue-300">biomey --version</span>
+                {/* Badge superior */}
+                <div className="inline-flex items-center gap-2 h-7 px-3 rounded-full bg-white dark:bg-dark-card border border-blue-200 dark:border-blue-900/50 shadow-sm mb-4">
+                  <Sparkles size={12} className="text-brand-blue" strokeWidth={2.4} />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-brand-blue">
+                    Soporte BIOMEY
+                  </span>
                 </div>
 
-                <div className="font-mono text-[11px] text-blue-300/70 mb-4 leading-relaxed">
-                  <p>→ BIOMEY POS Suite</p>
-                  <p>→ Support Service: <span className="text-green-400">● online</span></p>
-                  <p>→ Uptime: {fmtUptime(uptime)}</p>
-                </div>
+                {/* Título */}
+                <h1 className="text-3xl lg:text-4xl font-bold text-brand-black dark:text-dark-text tracking-tight leading-tight">
+                  ¿En qué podemos <span className="text-brand-blue">ayudarte</span>?
+                </h1>
 
-                {/* Título BIOMEY gigante */}
-                <div className="mb-4">
-                  <p className="text-[11px] font-bold tracking-[0.3em] uppercase text-blue-400/80 mb-1 font-mono">
-                    ~ desarrollado por ~
-                  </p>
-                  <h1
-                    className="text-5xl lg:text-7xl font-black tracking-tighter leading-none bg-clip-text text-transparent"
-                    style={{
-                      backgroundImage: 'linear-gradient(135deg, #ffffff 0%, #60a5fa 50%, #a78bfa 100%)',
-                    }}
-                  >
-                    BIOMEY
-                  </h1>
-                  <p className="text-sm font-mono text-blue-300/80 mt-2">
-                    // soporte técnico especializado
-                  </p>
-                </div>
-
-                <p className="text-sm text-blue-100/90 max-w-lg leading-relaxed">
-                  Estamos aquí para resolver cualquier duda, bug o mejora sobre tu punto de venta SNEAKERS.
+                <p className="text-sm text-gray-600 dark:text-dark-muted mt-3 max-w-xl leading-relaxed">
+                  Reporta problemas, resuelve dudas o sugiere mejoras para tu punto de venta.
+                  Te respondemos por WhatsApp en menos de 24 horas.
                 </p>
+
+                {/* Pills */}
+                <div className="flex flex-wrap gap-2 mt-5">
+                  <StatusPill
+                    icon={isOnline ? Wifi : Activity}
+                    label={isOnline ? 'Sistema en línea' : 'Modo offline'}
+                    tone={isOnline ? 'green' : 'amber'}
+                  />
+                  <StatusPill icon={Clock} label="Respuesta <24h" tone="blue" />
+                  <StatusPill icon={Shield} label="Actualizaciones incluidas" tone="purple" />
+                  <StatusPill icon={Package} label={`Build ${BUILD_DATE}`} tone="gray" />
+                </div>
               </div>
 
-              {/* Icono decorativo */}
-              <div className="w-24 h-24 lg:w-32 lg:h-32 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 backdrop-blur-sm flex items-center justify-center shrink-0 ring-1 ring-blue-400/30">
-                <Headphones size={48} className="text-blue-300" strokeWidth={1.5} />
-              </div>
-            </div>
+              {/* Card de contacto lateral */}
+              <div className="w-full sm:w-64 shrink-0">
+                <div className="rounded-2xl bg-white dark:bg-dark-card border border-green-200 dark:border-green-900/50 p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-950/40 flex items-center justify-center">
+                      <MessageCircle size={16} className="text-green-600 dark:text-green-400" strokeWidth={2.4} />
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-green-700 dark:text-green-400">
+                      Canal oficial
+                    </span>
+                  </div>
 
-            {/* Status pills */}
-            <div className="flex flex-wrap gap-2 mt-6">
-              <StatusPill
-                icon={isOnline ? Wifi : Activity}
-                label={isOnline ? 'Sistema en línea' : 'Modo offline'}
-                tone={isOnline ? 'green' : 'amber'}
-              />
-              <StatusPill icon={Clock} label="Respuesta <24h" tone="blue" />
-              <StatusPill icon={Shield} label="Actualizaciones incluidas" tone="purple" />
-              <StatusPill icon={Package} label={`Build ${BUILD_DATE}`} tone="gray" />
+                  <p className="text-[11px] text-gray-500 dark:text-dark-muted mb-3">
+                    Único medio de soporte
+                  </p>
+
+                  <div className="rounded-lg bg-green-50 dark:bg-green-950/30 p-2.5 mb-3">
+                    <p className="text-[10px] font-mono text-green-600 dark:text-green-400 uppercase tracking-wider mb-0.5">
+                      WhatsApp
+                    </p>
+                    <p className="text-base font-black text-green-900 dark:text-green-200 tracking-tight">
+                      +{WHATSAPP_COUNTRY} {WHATSAPP_NUMBER}
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCopyNumber}
+                      className="
+                        flex-1 inline-flex items-center justify-center gap-1.5
+                        h-8 rounded-lg text-[11px] font-semibold
+                        bg-white dark:bg-dark-card
+                        text-green-700 dark:text-green-300
+                        hover:bg-green-50 dark:hover:bg-green-950/40
+                        border border-green-200 dark:border-green-900/50
+                        transition-colors
+                      "
+                    >
+                      {copied ? <Check size={11} strokeWidth={2.4} /> : <Copy size={11} strokeWidth={2.4} />}
+                      {copied ? 'Copiado' : 'Copiar'}
+                    </button>
+                    <a
+                      href={`https://wa.me/${WHATSAPP_COUNTRY}${WHATSAPP_NUMBER}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="
+                        flex-1 inline-flex items-center justify-center gap-1.5
+                        h-8 rounded-lg text-[11px] font-bold
+                        bg-green-600 text-white
+                        hover:bg-green-700
+                        transition-colors
+                      "
+                    >
+                      <ExternalLink size={11} strokeWidth={2.4} />
+                      Abrir
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -298,11 +307,12 @@ export default function Support() {
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* SISTEMA + SESIÓN                                              */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        {/* Status del sistema */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <Card>
           <div className="flex items-center gap-2 mb-3">
-            <Server size={16} className="text-brand-blue" strokeWidth={2.2} />
+            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/40 flex items-center justify-center">
+              <Activity size={15} className="text-brand-blue" strokeWidth={2.4} />
+            </div>
             <h3 className="text-sm font-bold text-brand-black dark:text-dark-text">
               Estado del sistema
             </h3>
@@ -315,10 +325,11 @@ export default function Support() {
           </ul>
         </Card>
 
-        {/* Sesión actual */}
         <Card>
           <div className="flex items-center gap-2 mb-3">
-            <Cpu size={16} className="text-brand-blue" strokeWidth={2.2} />
+            <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/40 flex items-center justify-center">
+              <Cpu size={15} className="text-purple-600 dark:text-purple-400" strokeWidth={2.4} />
+            </div>
             <h3 className="text-sm font-bold text-brand-black dark:text-dark-text">
               Sesión actual
             </h3>
@@ -330,65 +341,10 @@ export default function Support() {
             <InfoRow icon={Package} label="App" value={`v${APP_VERSION}`} mono />
           </ul>
         </Card>
-
-        {/* WhatsApp destacado */}
-        <Card className="border-green-200 dark:border-green-900/50 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20">
-          <div className="flex items-center gap-2 mb-3">
-            <MessageCircle size={16} className="text-green-600 dark:text-green-400" strokeWidth={2.4} />
-            <h3 className="text-sm font-bold text-green-900 dark:text-green-300">
-              Canal oficial
-            </h3>
-          </div>
-          <p className="text-xs text-green-800 dark:text-green-400/80 mb-3">
-            Único medio de contacto para soporte.
-          </p>
-
-          <div className="rounded-lg bg-white dark:bg-green-950/40 p-3 mb-3 ring-1 ring-green-200 dark:ring-green-900/50">
-            <p className="text-[10px] font-mono text-green-600 dark:text-green-400 uppercase tracking-wider mb-1">
-              WhatsApp
-            </p>
-            <p className="text-lg font-black text-green-900 dark:text-green-200 tracking-tight">
-              +{WHATSAPP_COUNTRY} {WHATSAPP_NUMBER}
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleCopyNumber}
-              className="
-                flex-1 inline-flex items-center justify-center gap-1.5
-                h-9 rounded-lg text-xs font-semibold
-                bg-white dark:bg-green-950/40
-                text-green-700 dark:text-green-300
-                hover:bg-green-100 dark:hover:bg-green-950/60
-                ring-1 ring-green-200 dark:ring-green-900/50
-                transition-colors
-              "
-            >
-              {copied ? <Check size={12} strokeWidth={2.4} /> : <Copy size={12} strokeWidth={2.4} />}
-              {copied ? 'Copiado' : 'Copiar'}
-            </button>
-            <a
-              href={`https://wa.me/${WHATSAPP_COUNTRY}${WHATSAPP_NUMBER}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="
-                flex-1 inline-flex items-center justify-center gap-1.5
-                h-9 rounded-lg text-xs font-bold
-                bg-green-600 text-white
-                hover:bg-green-700
-                transition-colors
-              "
-            >
-              <ExternalLink size={12} strokeWidth={2.4} />
-              Abrir
-            </a>
-          </div>
-        </Card>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* TICKET / ISSUE FORM                                          */}
+      {/* TICKET FORM                                                   */}
       {/* ══════════════════════════════════════════════════════════════ */}
       <Card className="mb-6">
         <div className="flex items-start gap-3 mb-5 pb-5 border-b border-gray-100 dark:border-dark-border">
@@ -475,7 +431,7 @@ export default function Support() {
               rows={6}
               maxLength={800}
               className="
-                w-full px-3 py-3 rounded-xl text-sm resize-none font-mono
+                w-full px-3 py-3 rounded-xl text-sm resize-none
                 bg-gray-50 dark:bg-dark-surface text-brand-black dark:text-dark-text
                 border border-gray-200 dark:border-dark-border
                 focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
@@ -544,7 +500,9 @@ ${description.trim() || '(sin descripción)'}`}
         {/* Changelog */}
         <Card>
           <div className="flex items-center gap-2 mb-4">
-            <GitBranch size={16} className="text-brand-blue" strokeWidth={2.2} />
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/40 flex items-center justify-center">
+              <GitBranch size={15} className="text-indigo-600 dark:text-indigo-400" strokeWidth={2.4} />
+            </div>
             <h2 className="text-sm font-bold text-brand-black dark:text-dark-text">
               Últimas actualizaciones
             </h2>
@@ -553,9 +511,7 @@ ${description.trim() || '(sin descripción)'}`}
           <div className="space-y-4">
             {CHANGELOG.map((entry) => (
               <div key={entry.version} className="relative pl-6">
-                {/* Línea vertical */}
                 <div className="absolute left-2 top-2 bottom-0 w-px bg-gray-200 dark:bg-dark-border" />
-                {/* Punto */}
                 <div className={`absolute left-0 top-1.5 w-4 h-4 rounded-full ring-4 ring-white dark:ring-dark-card flex items-center justify-center ${
                   entry.tag === 'current'
                     ? 'bg-green-500'
@@ -598,7 +554,9 @@ ${description.trim() || '(sin descripción)'}`}
         {/* FAQ */}
         <Card>
           <div className="flex items-center gap-2 mb-4">
-            <HelpCircle size={16} className="text-brand-blue" strokeWidth={2.2} />
+            <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/40 flex items-center justify-center">
+              <HelpCircle size={15} className="text-amber-600 dark:text-amber-400" strokeWidth={2.4} />
+            </div>
             <h2 className="text-sm font-bold text-brand-black dark:text-dark-text">
               Preguntas frecuentes
             </h2>
@@ -654,7 +612,7 @@ ${description.trim() || '(sin descripción)'}`}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* FOOTER BIOMEY                                                */}
+      {/* FOOTER                                                       */}
       {/* ══════════════════════════════════════════════════════════════ */}
       <div className="text-center py-6">
         <div className="inline-flex items-center gap-2 text-[11px] font-mono text-gray-500 dark:text-dark-muted">
@@ -687,16 +645,16 @@ ${description.trim() || '(sin descripción)'}`}
 
 function StatusPill({ icon: Icon, label, tone = 'blue' }) {
   const tones = {
-    green:  'bg-green-500/15 text-green-300 ring-green-400/30',
-    blue:   'bg-blue-500/15 text-blue-300 ring-blue-400/30',
-    purple: 'bg-purple-500/15 text-purple-300 ring-purple-400/30',
-    gray:   'bg-white/10 text-white/70 ring-white/20',
+    green:  'bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-400 border-green-200 dark:border-green-900/50',
+    blue:   'bg-blue-50 dark:bg-blue-950/40 text-brand-blue border-blue-200 dark:border-blue-900/50',
+    purple: 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-900/50',
+    gray:   'bg-gray-50 dark:bg-dark-surface text-gray-600 dark:text-dark-muted border-gray-200 dark:border-dark-border',
   }
   return (
     <span className={`
       inline-flex items-center gap-1.5 h-7 px-3 rounded-full
-      backdrop-blur-sm text-[10px] font-bold uppercase tracking-wider font-mono
-      ring-1 ${tones[tone]}
+      text-[10px] font-bold uppercase tracking-wider
+      border ${tones[tone]}
     `}>
       <Icon size={11} strokeWidth={2.4} />
       {label}

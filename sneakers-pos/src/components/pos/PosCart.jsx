@@ -1,5 +1,5 @@
 // src/components/pos/PosCart.jsx
-import { ShoppingCart, UserPlus, User, Percent, StickyNote, Trash2, Save, X } from 'lucide-react'
+import { ShoppingCart, UserPlus, Building2, Percent, StickyNote, Trash2, Save, X } from 'lucide-react'
 import Button from '../common/Button'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -10,7 +10,6 @@ export default function PosCart({
   items = [],
   totals,
   customer,
-  // ⭐ Nuevas props
   totalPares = 0,
   volumeDiscount = null,
   onQuantityChange,
@@ -63,7 +62,7 @@ export default function PosCart({
         </div>
       </div>
 
-      {/* Cliente */}
+      {/* Mayorista */}
       <button
         onClick={onOpenCustomer}
         className="
@@ -83,31 +82,29 @@ export default function PosCart({
                 <p className="text-xs font-medium text-brand-black dark:text-dark-text truncate">
                   {customer.name}
                 </p>
-                {customer.isWholesale && (
-                  <Badge variant="info">
-                    Mayorista · {volumeDiscount?.discount > 0 ? `${volumeDiscount.discount}%` : 'sin dto.'}
-                  </Badge>
-                )}
+                <Badge variant="info">
+                  Mayorista · {volumeDiscount?.discount > 0 ? `${volumeDiscount.discount}%` : 'sin dto.'}
+                </Badge>
               </div>
-              {customer.isWholesale && customer.minPurchaseAmount > 0 && (
+              {customer.minPurchaseAmount > 0 && (
                 <p className="text-[10px] text-gray-500 dark:text-dark-muted">
                   Compra mínima: ${Number(customer.minPurchaseAmount).toLocaleString('es-MX')}
                 </p>
               )}
             </div>
-            <User size={14} className="text-gray-400 shrink-0" strokeWidth={2} />
+            <Building2 size={14} className="text-gray-400 shrink-0" strokeWidth={2} />
           </>
         ) : (
           <>
             <UserPlus size={16} className="text-gray-400 shrink-0" strokeWidth={2} />
             <span className="text-xs text-gray-500 dark:text-dark-muted flex-1">
-              Venta general · Asignar cliente
+              Venta general · Asignar mayorista
             </span>
           </>
         )}
       </button>
 
-      {/* ⭐ Hint de descuento por volumen */}
+      {/* Hint de descuento por volumen */}
       {customer?.isWholesale && hasItems && (
         <VolumeDiscountHint volumeDiscount={volumeDiscount} totalPares={totalPares} />
       )}
@@ -161,7 +158,7 @@ export default function PosCart({
 
               {totals.wholesaleDiscountAmount > 0 && (
                 <Row
-                  label={`Descuento ${customer?.isWholesale ? 'mayorista' : ''}${volumeDiscount?.tier ? ` (${volumeDiscount.discount}%)` : ''}`}
+                  label={`Descuento mayorista${volumeDiscount?.tier ? ` (${volumeDiscount.discount}%)` : ''}`}
                   value={-totals.wholesaleDiscountAmount}
                   tone="info"
                 />
@@ -199,17 +196,15 @@ export default function PosCart({
 }
 
 /**
- * ⭐ Hint de descuento por volumen
+ * Hint de descuento por volumen
  */
 function VolumeDiscountHint({ volumeDiscount, totalPares }) {
   if (!volumeDiscount) return null
 
   const { discount, tier, nextTier } = volumeDiscount
 
-  // Sin escalones definidos → no mostrar nada
   if (!tier && !nextTier) return null
 
-  // Aplicado un tier actual y hay un siguiente alcanzable
   if (tier && nextTier) {
     const faltan = Number(nextTier.minQty) - totalPares
     return (
@@ -224,7 +219,6 @@ function VolumeDiscountHint({ volumeDiscount, totalPares }) {
     )
   }
 
-  // Aplicado el tier máximo (sin siguiente)
   if (tier && !nextTier) {
     return (
       <div className="px-4 py-2 bg-emerald-50/60 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/40">
@@ -235,7 +229,6 @@ function VolumeDiscountHint({ volumeDiscount, totalPares }) {
     )
   }
 
-  // Sin tier aplicado pero hay uno alcanzable
   if (!tier && nextTier) {
     const faltan = Number(nextTier.minQty) - totalPares
     if (faltan <= 0) return null

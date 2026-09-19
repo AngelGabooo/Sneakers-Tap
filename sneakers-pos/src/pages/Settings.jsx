@@ -163,18 +163,7 @@ export default function Settings() {
         {tab === 'ticket' && (
           <TicketSection draft={draft} updateSection={updateSection} />
         )}
-        {tab === 'sales' && (
-          <SalesSection draft={draft} updateSection={updateSection} />
-        )}
-        {tab === 'taxes' && (
-          <TaxesSection draft={draft} updateSection={updateSection} />
-        )}
-        {tab === 'branches' && (
-          <BranchesSection draft={draft} updateDraft={updateDraft} />
-        )}
-        {tab === 'preferences' && (
-          <PreferencesSection draft={draft} updateSection={updateSection} />
-        )}
+   
       </div>
 
       {/* ⭐ Zona peligrosa: Reset local */}

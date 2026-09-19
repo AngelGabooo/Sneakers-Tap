@@ -79,7 +79,6 @@ export default function UsersRowActions({
   const items = []
 
   // Acciones principales
-  items.push({ key: 'profile', label: 'Ver perfil', icon: Eye, onClick: () => onViewProfile?.(user) })
   items.push({ key: 'edit', label: 'Editar empleado', icon: Pencil, onClick: () => onEdit?.(user) })
 
   if (status === 'pending') {

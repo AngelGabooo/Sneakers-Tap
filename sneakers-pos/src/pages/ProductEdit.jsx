@@ -44,9 +44,30 @@ function migrateToVariantsBySize(product) {
   return map
 }
 
-function variantsFromSizeColorMap(variantsBySize, baseSku, previous = []) {
+/**
+ * Construye la lista de variantes a partir del mapa { size: [colors] }.
+ *
+ * Fusiona 3 fuentes para preservar el stock:
+ *   1) persistedVariants → variantes guardadas en el producto (Supabase)
+ *   2) previous          → variantes que ya están en el estado local (edición en curso)
+ *
+ * La fuente 2 tiene prioridad sobre la 1 porque refleja los cambios que el
+ * usuario hizo en esta sesión de edición.
+ */
+function variantsFromSizeColorMap(variantsBySize, baseSku, previous = [], persistedVariants = []) {
   if (!baseSku) return []
-  const prevMap = new Map(previous.map((v) => [v.id, v]))
+
+  // Combinamos: primero los persistidos (base), luego los del estado actual (edición)
+  const prevMap = new Map()
+  persistedVariants.forEach((v) => {
+    if (!v?.size || !v?.color) return
+    prevMap.set(`${v.size}-${v.color}`, v)
+  })
+  previous.forEach((v) => {
+    if (!v?.size || !v?.color) return
+    prevMap.set(`${v.size}-${v.color}`, v)
+  })
+
   const list = []
   Object.entries(variantsBySize).forEach(([size, colors]) => {
     ;(colors || []).forEach((color) => {
@@ -54,6 +75,7 @@ function variantsFromSizeColorMap(variantsBySize, baseSku, previous = []) {
       const sku = buildVariantSku(baseSku, size, color)
       const barcode = buildVariantBarcode(sku)
       const prev = prevMap.get(id)
+
       list.push({
         id,
         label: `${size} / ${color}`,
@@ -78,6 +100,7 @@ export default function ProductEdit() {
 
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [initialized, setInitialized] = useState(false)
 
   const [form, setForm] = useState(null)
   const [errors, setErrors] = useState({})
@@ -92,6 +115,9 @@ export default function ProductEdit() {
 
   const barcodeAutoRef = useRef(true)
 
+  // -------------------------------------------------------------
+  // Carga inicial del producto
+  // -------------------------------------------------------------
   useEffect(() => {
     if (!productId) { setNotFound(true); setLoading(false); return }
     if (!product) { setNotFound(true); setLoading(false); return }
@@ -121,6 +147,7 @@ export default function ProductEdit() {
     setLoading(false)
     setDirty(false)
     barcodeAutoRef.current = !product.barcode
+    setInitialized(true)
   }, [productId, product])
 
   const options = { categories: [], brands: [], locations: [], suppliers: [] }
@@ -135,6 +162,7 @@ export default function ProductEdit() {
     if (errors[field]) setErrors((e) => ({ ...e, [field]: undefined }))
   }
 
+  // Auto-generación de barcode
   useEffect(() => {
     if (!form) return
     if (!barcodeAutoRef.current) return
@@ -147,11 +175,20 @@ export default function ProductEdit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form?.name, form?.sku])
 
+  // Reconstrucción de variantes cuando cambia el mapa de tallas/colores
   useEffect(() => {
+    if (!initialized) return
     if (!form?.sku) return
-    setVariants((prev) => variantsFromSizeColorMap(variantsBySize, form.sku, prev))
+    setVariants((prev) =>
+      variantsFromSizeColorMap(
+        variantsBySize,
+        form.sku,
+        prev,
+        product?.variants || []
+      )
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variantsBySize, form?.sku])
+  }, [variantsBySize, form?.sku, initialized])
 
   const handleChangeVariantsBySize = (next) => {
     setVariantsBySize(next)
@@ -200,7 +237,7 @@ export default function ProductEdit() {
         finalImages = await storageService.uploadMany(images, 'products')
       }
 
-      // 2. Preparar variantes
+      // 2. Preparar variantes (preservando stock)
       const safeVariants = variants.map((v) => {
         const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
         const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
@@ -208,6 +245,7 @@ export default function ProductEdit() {
           ...v,
           sku: String(variantSku || ''),
           barcode: String(variantBarcode || ''),
+          stock: Number(v.stock) || 0,
         }
       })
 

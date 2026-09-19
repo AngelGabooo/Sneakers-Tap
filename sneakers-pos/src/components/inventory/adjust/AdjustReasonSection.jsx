@@ -1,27 +1,15 @@
 import Card from '../../common/Card'
-import SelectField from '../../common/SelectField'
 import TextField from '../../common/TextField'
 import TextareaField from '../../common/TextareaField'
 
-const REASONS = [
-  { value: 'physical',   label: 'Conteo físico' },
-  { value: 'reception',  label: 'Recepción de mercancía' },
-  { value: 'return',     label: 'Devolución de cliente' },
-  { value: 'damage',     label: 'Daño' },
-  { value: 'shrinkage',  label: 'Merma' },
-  { value: 'loss',       label: 'Pérdida' },
-  { value: 'correction', label: 'Corrección' },
-  { value: 'error',      label: 'Error de captura' },
-  { value: 'initial',    label: 'Inventario inicial' },
-  { value: 'transfer',   label: 'Transferencia' },
-  { value: 'other',      label: 'Otro' },
-]
-
+/**
+ * Detalles del ajuste.
+ * El motivo está fijo como "Error de captura" (no se selecciona).
+ * Solo se muestra Notas y Referencia opcional.
+ */
 export default function AdjustReasonSection({
-  reason, onReasonChange,
   documentRef, onDocumentRefChange,
   notes, onNotesChange,
-  errors,
 }) {
   return (
     <Card>
@@ -30,21 +18,29 @@ export default function AdjustReasonSection({
           Detalles del ajuste
         </h2>
         <p className="text-sm text-gray-500 dark:text-dark-muted mt-0.5">
-          Motivo, referencia y notas opcionales.
+          Agrega notas o una referencia al documento que respalda este ajuste.
         </p>
       </header>
 
       <div className="space-y-4">
-        <SelectField
-          id="reason"
-          label="Motivo"
-          required
-          value={reason}
-          onChange={(e) => onReasonChange?.(e.target.value)}
-          options={REASONS}
-          placeholder="Seleccionar motivo"
-          error={errors?.reason}
-        />
+        {/* Motivo fijo */}
+        <div>
+          <label className="block text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">
+            Motivo
+          </label>
+          <div className="
+            inline-flex items-center gap-2 h-10 px-3 rounded-lg
+            bg-gray-50 dark:bg-dark-surface
+            border border-gray-200 dark:border-dark-border
+            text-sm text-brand-black dark:text-dark-text
+          ">
+            <span className="w-2 h-2 rounded-full bg-brand-blue" />
+            Error de captura
+          </div>
+          <p className="text-xs text-gray-500 dark:text-dark-muted mt-1">
+            Todos los ajustes se registran con este motivo.
+          </p>
+        </div>
 
         <TextField
           id="documentRef"

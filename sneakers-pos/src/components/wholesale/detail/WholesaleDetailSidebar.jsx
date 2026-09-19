@@ -1,3 +1,4 @@
+// src/components/wholesale/detail/WholesaleDetailSidebar.jsx
 import { CheckCircle2, AlertTriangle, XCircle, Ban } from 'lucide-react'
 import Card from '../../common/Card'
 import Badge from '../../common/Badge'
@@ -5,19 +6,16 @@ import Badge from '../../common/Badge'
 const fmt = (n) =>
   `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`
 
+// 👇 Solo 2 niveles
 const CONDITION = {
-  basic:       'Mayoreo Básico',
-  premium:     'Mayoreo Premium',
-  distributor: 'Distribuidor',
-  custom:      'Personalizado',
+  basic:   'Mayoreo Básico',
+  premium: 'Mayoreo Premium',
 }
 
 const PRICE_LIST = {
-  public:      'Precio público',
-  basic:       'Mayoreo Básico',
-  premium:     'Mayoreo Premium',
-  distributor: 'Distribuidor',
-  custom:      'Personalizada',
+  public:  'Precio público',
+  basic:   'Mayoreo Básico',
+  premium: 'Mayoreo Premium',
 }
 
 function getHealth(w) {
@@ -99,16 +97,6 @@ export default function WholesaleDetailSidebar({ form }) {
           <Row label="Utilizado"   value={fmt(used)} />
           <Row label="Disponible"  value={fmt(available)} emphasis />
           <Row label="Saldo"       value={fmt(form?.balance)} />
-        </ul>
-      </Card>
-
-      <Card>
-        <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text mb-3">
-          Responsable
-        </h3>
-        <ul className="space-y-2 text-sm">
-          <Row label="Vendedor" value={form?.responsable || '—'} />
-          <Row label="Sucursal" value={form?.branch || '—'} />
         </ul>
       </Card>
     </div>

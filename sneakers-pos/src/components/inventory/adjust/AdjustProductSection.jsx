@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Search, X, Package, ChevronDown } from 'lucide-react'
+import { Search, X, Package } from 'lucide-react'
 import Card from '../../common/Card'
 import SelectField from '../../common/SelectField'
 
@@ -7,18 +7,15 @@ import SelectField from '../../common/SelectField'
  * Sección de selección de producto y variante.
  * - Búsqueda con dropdown de productos.
  * - Select de variantes (o mensaje si no hay variantes).
- * - Select de ubicación.
+ * - Ubicación fija: "Tienda principal" (informativa, no seleccionable).
  */
 export default function AdjustProductSection({
   products = [],
   selectedProductId,
   selectedVariantId,
-  location,
-  locations = [],
   errors,
   onSelectProduct,
   onSelectVariant,
-  onChangeLocation,
 }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -198,18 +195,25 @@ export default function AdjustProductSection({
           </div>
         )}
 
-        {/* Ubicación */}
+        {/* Ubicación — fija */}
         {selectedProduct && (
-          <SelectField
-            id="location"
-            label="Ubicación"
-            required
-            value={location || ''}
-            onChange={(e) => onChangeLocation?.(e.target.value)}
-            placeholder="Seleccionar ubicación"
-            options={locations}
-            error={errors?.location}
-          />
+          <div>
+            <label className="block text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">
+              Ubicación
+            </label>
+            <div className="
+              inline-flex items-center gap-2 h-11 px-3 rounded-lg
+              bg-gray-50 dark:bg-dark-surface
+              border border-gray-200 dark:border-dark-border
+              text-sm text-brand-black dark:text-dark-text
+            ">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              Tienda principal
+            </div>
+            <p className="text-xs text-gray-500 dark:text-dark-muted mt-1">
+              Solo existe una ubicación configurada.
+            </p>
+          </div>
         )}
       </div>
     </Card>

@@ -3,10 +3,7 @@
 export const SETTINGS_TABS = [
   { key: 'store',        label: 'Información de la tienda' },
   { key: 'ticket',       label: 'Ticket y comprobantes' },
-  { key: 'sales',        label: 'Ventas' },
-  { key: 'taxes',        label: 'Impuestos' },
-  { key: 'branches',     label: 'Sucursales' },
-  { key: 'preferences',  label: 'Preferencias' },
+
 ]
 
 export const TICKET_WIDTHS = [
