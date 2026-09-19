@@ -1,18 +1,12 @@
 # print-label.ps1
-# Imprime una imagen PNG/JPG en una impresora de etiquetas (Brother QL-800)
-# usando el driver oficial de Windows + System.Drawing.Printing
+# Imprime una imagen PNG/JPG en una impresora de etiquetas (Brother QL-800).
+# IMPORTANTE: NO se define PaperSize aquí porque el driver ya tiene
+# configurado el rollo continuo (62mm x 29mm). Definirlo por código rompe
+# la impresión (sale en blanco).
 
 param(
     [Parameter(Mandatory=$true)][string]$ImagePath,
-    [Parameter(Mandatory=$true)][string]$PrinterName,
-
-    # Tamaño de etiqueta en centésimas de pulgada (1/100 in)
-    # DK-1201 = 29mm x 90mm  =>  1.1417in x 3.5433in  =>  114 x 354
-    [int]$PaperWidth  = 114,
-    [int]$PaperHeight = 354,
-
-    # Orientación. DK-1201 en QL-800 se imprime "acostada" (landscape)
-    [switch]$Landscape
+    [Parameter(Mandatory=$true)][string]$PrinterName
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -27,29 +21,17 @@ $img = [System.Drawing.Image]::FromFile($ImagePath)
 $doc = New-Object System.Drawing.Printing.PrintDocument
 $doc.PrinterSettings.PrinterName = $PrinterName
 
-# Verificar que la impresora existe
 if (-not $doc.PrinterSettings.IsValid) {
     Write-Error "Impresora no válida: $PrinterName"
     $img.Dispose()
     exit 1
 }
 
-# Sin márgenes
+# Sin márgenes (esto sí funciona en todos los drivers)
 $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
 
-# Orientación
-$doc.DefaultPageSettings.Landscape = [bool]$Landscape
-
-# Tamaño de papel personalizado (DK-1201)
-try {
-    $doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize(
-        "DK-1201",
-        $PaperWidth,
-        $PaperHeight
-    )
-} catch {
-    Write-Warning "No se pudo asignar PaperSize personalizado: $_"
-}
+# ⚠️ NO tocar DefaultPageSettings.PaperSize → el driver usa el suyo
+# ⚠️ NO tocar Landscape → respetar el driver
 
 # Handler que dibuja la imagen a página completa
 $drawHandler = {

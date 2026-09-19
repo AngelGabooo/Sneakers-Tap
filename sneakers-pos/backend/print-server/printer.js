@@ -16,7 +16,7 @@ export const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Brother QL-
 const PS_SCRIPT = join(__dirname, 'print-raw.ps1')
 
 /**
- * Envía un Buffer RAW a la impresora usando PowerShell + winspool API.
+ * Envia un Buffer RAW a la impresora usando PowerShell + winspool API.
  * 100% nativo de Windows, sin dependencias nativas de Node.
  */
 export async function sendToPrinter(buffer) {
@@ -115,30 +115,26 @@ export function createPrinter() {
 }
 
 // =====================================================================
-// Brother QL-800 — impresión de etiquetas como IMAGEN
+// Brother QL-800 - impresion de etiquetas como IMAGEN
 // =====================================================================
 
 const PS_LABEL_SCRIPT = join(__dirname, 'print-label.ps1')
 
 /**
- * Envía una imagen (Buffer PNG/JPG) a la impresora de etiquetas.
- * Usa el driver oficial de Brother en Windows vía System.Drawing.Printing.
+ * Envia una imagen (Buffer PNG/JPG) a la impresora de etiquetas.
+ * Usa el driver oficial de Brother en Windows via System.Drawing.Printing.
  *
- * @param {Buffer} imageBuffer - Contenido binario de la imagen
+ * IMPORTANTE: NO se define PaperSize ni Landscape. El driver ya tiene
+ * configurado el rollo continuo 62mm x 29mm + corte automatico.
+ * Si se define desde aqui, el driver no lo reconoce y sale en blanco.
+ *
+ * @param {Buffer} imageBuffer - Contenido binario de la imagen (PNG/JPG)
  * @param {Object} [opts]
- * @param {string} [opts.printerName]  - Nombre de la impresora (por defecto LABEL_PRINTER_NAME)
- * @param {number} [opts.paperWidth]   - Ancho en centésimas de pulgada (DK-1201 = 114)
- * @param {number} [opts.paperHeight]  - Alto en centésimas de pulgada (DK-1201 = 354)
- * @param {boolean} [opts.landscape]   - Orientación (true = acostada)
+ * @param {string} [opts.printerName] - Nombre de la impresora
  * @returns {Promise<boolean>}
  */
 export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
-  const {
-    printerName = LABEL_PRINTER_NAME,
-    paperWidth = 114,   // DK-1201 29mm
-    paperHeight = 354,  // DK-1201 90mm
-    landscape = false,
-  } = opts
+  const { printerName = LABEL_PRINTER_NAME } = opts
 
   const tmpFile = join(tmpdir(), `sneakers-label-${Date.now()}.png`)
   await writeFile(tmpFile, imageBuffer)
@@ -150,10 +146,7 @@ export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
       '-File', PS_LABEL_SCRIPT,
       '-ImagePath', tmpFile,
       '-PrinterName', printerName,
-      '-PaperWidth', String(paperWidth),
-      '-PaperHeight', String(paperHeight),
     ]
-    if (landscape) args.push('-Landscape')
 
     const { stdout, stderr } = await execFileAsync('powershell.exe', args, {
       windowsHide: true,
@@ -178,6 +171,6 @@ export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
  */
 export function decodeDataUrl(dataUrl) {
   const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl || '')
-  if (!m) throw new Error('data URL inválido')
+  if (!m) throw new Error('data URL invalido')
   return Buffer.from(m[1], 'base64')
 }

@@ -17,18 +17,18 @@ import QrCodeDisplay from '../common/QrCodeDisplay'
 
 const PRINT_SERVER = 'http://localhost:3001'
 
-// Etiqueta DK-1201: 29mm × 90mm → proporción 3.103 : 1
+// Etiqueta rollo continuo: 62mm × 29mm → proporción 2.1379 : 1
 const LABEL_W = 360
-const LABEL_H = 120
+const LABEL_H = 168   // 360 / 2.1379 ≈ 168
 
-// Cuántas copias idénticas caben en la MISMA etiqueta
-const COPIES_PER_LABEL = 3
+// 1 código por etiqueta
+const COPIES_PER_LABEL = 1
 
 /**
  * Agrupa los bloques en etiquetas físicas.
- * Cada etiqueta contiene COPIES_PER_LABEL copias IDÉNTICAS de la MISMA variante.
+ * Cada etiqueta contiene 1 sola copia (código + datos).
  */
-function buildSheets(variants = [], copiesByVariantId = {}, perSheet = 3) {
+function buildSheets(variants = [], copiesByVariantId = {}, perSheet = 1) {
   const sheets = []
 
   variants.forEach((v) => {
@@ -53,115 +53,18 @@ function buildSheets(variants = [], copiesByVariantId = {}, perSheet = 3) {
 }
 
 /**
- * Un bloque individual: marca + producto + talla + color + SKU + código.
- */
-function CodeBlock({ v, product, codeType }) {
-  return (
-    <div
-      style={{
-        flex: '1 1 0',
-        minWidth: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        gap: '1px',
-        padding: '0 2px',
-        textAlign: 'center',
-      }}
-    >
-      {/* Marca tienda */}
-      <div
-        style={{
-          fontSize: '6px',
-          fontWeight: 800,
-          letterSpacing: '0.8px',
-          color: '#2563EB',
-          textTransform: 'uppercase',
-          lineHeight: 1,
-        }}
-      >
-        SNEAKERS
-      </div>
-
-      {/* Nombre del producto */}
-      <div
-        style={{
-          fontSize: '8px',
-          fontWeight: 700,
-          color: '#111827',
-          lineHeight: 1.1,
-          width: '100%',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {product.name || 'Producto'}
-      </div>
-
-      {/* Talla · Color */}
-      <div
-        style={{
-          fontSize: '7px',
-          fontWeight: 700,
-          color: '#1E3A8A',
-          lineHeight: 1.1,
-          width: '100%',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        Talla {v.size} · {v.color}
-      </div>
-
-      {/* SKU */}
-      <div
-        style={{
-          fontSize: '5.5px',
-          color: '#6B7280',
-          fontFamily: 'ui-monospace, monospace',
-          lineHeight: 1.1,
-          width: '100%',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {v.sku || '—'}
-      </div>
-
-      {/* Código */}
-      <div
-        style={{
-          marginTop: '2px',
-          background: '#ffffff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {codeType === 'qr' ? (
-          <QrCodeDisplay value={v.barcode} size={58} />
-        ) : (
-          <BarcodeDisplay
-            value={v.barcode}
-            format="CODE128"
-            height={32}
-            width={1.0}
-            fontSize={6}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
-
-/**
- * Una etiqueta física con N bloques (todos de la MISMA variante).
+ * Una etiqueta individual: layout horizontal
+ * ┌──────────────────────┬────────────┐
+ * │ SNEAKERS             │            │
+ * │ AIR FORCE 1          │   QR /     │
+ * │ Talla 28.5 · Blanco  │  Barcode   │
+ * │ N-AIRFOR-28.5-BLA    │            │
+ * └──────────────────────┴────────────┘
  */
 function LabelContent({ sheet, product, codeType }) {
+  const v = sheet[0]
+  if (!v) return null
+
   return (
     <div
       style={{
@@ -169,34 +72,125 @@ function LabelContent({ sheet, product, codeType }) {
         height: `${LABEL_H}px`,
         background: '#ffffff',
         color: '#111827',
-        padding: '6px 8px',
+        padding: '16px 18px',
         boxSizing: 'border-box',
         fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
         display: 'flex',
-        alignItems: 'stretch',
-        justifyContent: 'space-around',
-        gap: '4px',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '12px',
         overflow: 'hidden',
         border: '1px solid #e5e7eb',
         borderRadius: '4px',
       }}
     >
-      {sheet.map((v, i) => (
+      {/* ─── Columna izquierda: info ─── */}
+      <div
+        style={{
+          flex: '1 1 0',
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: '3px',
+        }}
+      >
+        {/* Marca */}
         <div
-          key={v.blockId}
           style={{
-            flex: '1 1 0',
-            minWidth: 0,
-            display: 'flex',
-            alignItems: 'stretch',
-            justifyContent: 'center',
-            borderLeft: i > 0 ? '1px dashed #d1d5db' : 'none',
-            paddingLeft: i > 0 ? '4px' : 0,
+            fontSize: '10px',
+            fontWeight: 800,
+            letterSpacing: '1px',
+            color: '#2563EB',
+            textTransform: 'uppercase',
+            lineHeight: 1,
           }}
         >
-          <CodeBlock v={v} product={product} codeType={codeType} />
+          SNEAKERS
         </div>
-      ))}
+
+        {/* Nombre producto */}
+        <div
+          style={{
+            fontSize: '15px',
+            fontWeight: 700,
+            color: '#111827',
+            lineHeight: 1.1,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {product.name || 'Producto'}
+        </div>
+
+        {/* Talla · Color */}
+        <div
+          style={{
+            fontSize: '12px',
+            fontWeight: 700,
+            color: '#1E3A8A',
+            lineHeight: 1.15,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          Talla {v.size} · {v.color}
+        </div>
+
+        {/* SKU */}
+        <div
+          style={{
+            fontSize: '9px',
+            color: '#6B7280',
+            fontFamily: 'ui-monospace, monospace',
+            lineHeight: 1.15,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            marginTop: '2px',
+          }}
+        >
+          {v.sku || '—'}
+        </div>
+      </div>
+
+      {/* ─── Separador vertical ─── */}
+      <div
+        style={{
+          width: '1px',
+          height: '70%',
+          background: '#e5e7eb',
+          flexShrink: 0,
+        }}
+      />
+
+      {/* ─── Columna derecha: código ─── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          background: '#ffffff',
+          padding: '2px',
+        }}
+      >
+        {codeType === 'qr' ? (
+          <QrCodeDisplay value={v.barcode} size={100} />
+        ) : (
+          <BarcodeDisplay
+            value={v.barcode}
+            format="CODE128"
+            height={70}
+            width={1.3}
+            fontSize={9}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -225,7 +219,7 @@ export default function VariantsLabelPrintModal({
     setCodeType(initialCodeType)
   }, [initialCodeType])
 
-  // Inicializa la selección cuando se abre el modal o cambian las variantes
+  // Inicializa la selección cuando se abre el modal
   useEffect(() => {
     if (!open) return
     const next = {}
@@ -233,20 +227,18 @@ export default function VariantsLabelPrintModal({
       const stock = Math.max(0, Number(v.stock) || 0)
       next[v.id] = {
         selected: stock > 0,
-        copies: 1, // 1 = 1 etiqueta física (con 3 bloques idénticos)
+        copies: 1,
       }
     })
     setSelection(next)
   }, [open, variants])
 
-  // Total de etiquetas físicas (suma de copias seleccionadas)
   const totalLabels = useMemo(() => {
     return Object.values(selection).reduce((acc, s) => {
       return acc + (s.selected ? Math.max(0, Number(s.copies) || 0) : 0)
     }, 0)
   }, [selection])
 
-  // Etiquetas físicas armadas (cada una con 3 copias idénticas)
   const sheets = useMemo(() => {
     const copiesByVariantId = {}
     Object.entries(selection).forEach(([id, s]) => {
@@ -314,11 +306,9 @@ export default function VariantsLabelPrintModal({
     setProgress({ current: 0, total: totalLabels })
 
     try {
-      // 🔑 Esperar a que el navegador pinte los QR/barcodes del contenedor oculto
       await new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))
       )
-      // 🔑 Delay extra para SVGs complejos (QR grandes)
       await new Promise((r) => setTimeout(r, 350))
 
       const images = []
@@ -331,7 +321,6 @@ export default function VariantsLabelPrintModal({
           continue
         }
 
-        // 🔍 DEBUG: cuántos SVGs hay en cada sheet
         const svgCount = node.querySelectorAll('svg').length
         console.log(`📸 Sheet ${i} — ${svgCount} SVG(s)`)
 
@@ -382,11 +371,11 @@ export default function VariantsLabelPrintModal({
           <div className="flex items-center gap-2">
             <Tag size={16} className="text-brand-blue" strokeWidth={2} />
             <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text">
-              Imprimir etiquetas (QL-800 · DK-1201)
+              Imprimir etiquetas (QL-800 · 62×29 mm)
             </h3>
             <span className="text-xs text-gray-500 dark:text-dark-muted">
               ({totalLabels} {totalLabels === 1 ? 'etiqueta' : 'etiquetas'} ·{' '}
-              {COPIES_PER_LABEL} copias por etiqueta)
+              1 código por etiqueta)
             </span>
           </div>
           <button
@@ -522,26 +511,9 @@ export default function VariantsLabelPrintModal({
                         : 'border-gray-200 dark:border-dark-border'}
                     `}
                   >
-                    {/* Preview de un bloque individual */}
+                    {/* Preview de la etiqueta */}
                     <div className="shrink-0 flex items-center justify-center lg:justify-start">
-                      <div
-                        style={{
-                          width: '110px',
-                          height: `${LABEL_H}px`,
-                          background: '#ffffff',
-                          color: '#111827',
-                          padding: '6px 8px',
-                          boxSizing: 'border-box',
-                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        <CodeBlock v={v} product={product} codeType={codeType} />
-                      </div>
+                      <LabelContent sheet={[v]} product={product} codeType={codeType} />
                     </div>
 
                     {/* Controles */}
@@ -592,8 +564,7 @@ export default function VariantsLabelPrintModal({
                         />
                         {sel.selected && sel.copies > 0 && (
                           <span className="text-xs text-gray-500 dark:text-dark-muted">
-                            → {sel.copies} {sel.copies === 1 ? 'etiqueta' : 'etiquetas'} ·{' '}
-                            {sel.copies * COPIES_PER_LABEL} códigos en total
+                            → {sel.copies} {sel.copies === 1 ? 'etiqueta' : 'etiquetas'}
                           </span>
                         )}
                       </div>
@@ -613,8 +584,7 @@ export default function VariantsLabelPrintModal({
             ) : totalLabels > 0 ? (
               <>
                 Se imprimirán <strong>{totalLabels}</strong>{' '}
-                {totalLabels === 1 ? 'etiqueta' : 'etiquetas'} físicas, cada una con{' '}
-                <strong>{COPIES_PER_LABEL} copias idénticas</strong> · DK-1201 (29×90 mm) ·{' '}
+                {totalLabels === 1 ? 'etiqueta' : 'etiquetas'} · 62×29 mm · 1 código por etiqueta ·{' '}
                 <strong>{codeType === 'qr' ? 'QR' : 'Código de barras'}</strong>
               </>
             ) : (
@@ -646,7 +616,7 @@ export default function VariantsLabelPrintModal({
           </div>
         )}
 
-        {/* Contenedor oculto: etiquetas físicas completas (3 copias idénticas cada una) */}
+        {/* Contenedor oculto: etiquetas físicas (1 código por etiqueta) */}
         <div
           aria-hidden="true"
           style={{
