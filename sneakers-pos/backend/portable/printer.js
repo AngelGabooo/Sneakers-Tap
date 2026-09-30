@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url'
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-export const PRINTER_NAME = process.env.PRINTER_NAME || 'Ghia58mm1'
+export const PRINTER_NAME = process.env.PRINTER_NAME || 'POS-58'
 export const PRINTER_PORT = process.env.PRINTER_PORT || 'LPT1:'
 export const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Brother QL-800'
 
