@@ -1,0 +1,38 @@
+========================================
+  SNEAKERS POS - PRINT SERVER
+========================================
+
+INSTRUCCIONES:
+
+1. La PRIMERA VEZ:
+   - Doble clic en "install.bat"
+   - Espera a que diga "INSTALACION COMPLETADA"
+
+2. CADA VEZ que uses el POS:
+   - Doble clic en "start.bat"
+   - Deja esa ventana abierta (puedes minimizarla)
+   - Abre el POS en Chrome
+   - Cuando termines, cierra la ventana negra
+
+PARA QUE ARRANQUE AUTOMATICO AL ENCENDER LA PC:
+
+1. Presiona Win + R
+2. Escribe: shell:startup
+3. Se abre una carpeta
+4. Copia un acceso directo a "start.bat" ahi
+
+PROBLEMAS:
+
+- Si el cajon no abre: verifica que la ventana negra
+  este abierta y diga "Corriendo en http://localhost:3001"
+
+- Si sale "Node.js no esta instalado": descargalo de
+  https://nodejs.org e instalalo.
+
+- Para verificar que todo esta bien:
+  Abre Chrome y ve a: http://localhost:3001/health
+  Debe decir: {"ok":true,...}
+
+- Si Chrome dice "Mixed Content" o "failed to fetch":
+  Abre el POS desde el acceso directo "Abrir POS"
+  (no desde Chrome normal).
