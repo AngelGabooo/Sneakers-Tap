@@ -33,7 +33,6 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
   const { sales } = useSales()
 
   // ⭐ Calcular los CARGOS (ventas a crédito) para este crédito
-  //    desde la creación del crédito
   const charges = useMemo(() => {
     if (!open || !credit) return []
 
@@ -74,6 +73,18 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
       const tb = new Date(b.createdAt || b.paidAt).getTime()
       return tb - ta
     })
+  }, [charges, payments])
+
+  // 🆕 Totales para el resumen
+  const totals = useMemo(() => {
+    const totalCharges = charges.reduce((a, c) => a + c.amount, 0)
+    const totalPayments = payments.reduce((a, p) => a + (Number(p.amount) || 0), 0)
+    return {
+      totalCharges,
+      totalPayments,
+      paymentsCount: payments.length,
+      chargesCount: charges.length,
+    }
   }, [charges, payments])
 
   if (!open || !credit) return null
@@ -162,6 +173,34 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
               <InfoRow icon={FileText} label="Notas" value={credit.notes} />
             )}
           </div>
+
+          {/* 🆕 Resumen de abonos */}
+          {(totals.chargesCount > 0 || totals.paymentsCount > 0) && (
+            <div className="p-5 border-b border-gray-100 dark:border-dark-border">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-red-50/60 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <TrendingDown size={12} className="text-brand-red" strokeWidth={2.2} />
+                    <p className="text-[10px] uppercase text-brand-red font-semibold">Cargos</p>
+                  </div>
+                  <p className="text-base font-bold text-brand-red">{fmt(totals.totalCharges)}</p>
+                  <p className="text-[10px] text-gray-500 dark:text-dark-muted mt-0.5">
+                    {totals.chargesCount} {totals.chargesCount === 1 ? 'venta' : 'ventas'} a crédito
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <HandCoins size={12} className="text-emerald-600 dark:text-emerald-400" strokeWidth={2.2} />
+                    <p className="text-[10px] uppercase text-emerald-600 dark:text-emerald-400 font-semibold">Abonos</p>
+                  </div>
+                  <p className="text-base font-bold text-emerald-600 dark:text-emerald-400">{fmt(totals.totalPayments)}</p>
+                  <p className="text-[10px] text-gray-500 dark:text-dark-muted mt-0.5">
+                    {totals.paymentsCount} {totals.paymentsCount === 1 ? 'abono' : 'abonos'} registrados
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Historial combinado (cargos + pagos) */}
           <div className="p-5">
@@ -261,7 +300,7 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
               className="w-full"
               onClick={() => onPay?.(credit)}
             >
-              Registrar pago
+              Abonar
             </Button>
           )}
           <div className="flex gap-2">

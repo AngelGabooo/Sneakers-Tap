@@ -38,21 +38,31 @@ export default function Credits() {
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState(null)
 
+  // 🆕 Sesión de caja activa (se recalcula cada vez que se abre el modal)
+  const [activeSession, setActiveSession] = useState(null)
+
   useEffect(() => {
     setLoading(true)
     refresh().finally(() => setLoading(false))
   }, []) // eslint-disable-line
 
+  // 🆕 Cada vez que se abre el modal de abono, consultamos la caja abierta
+  useEffect(() => {
+    if (paymentTarget) {
+      setActiveSession(getAnyOpenSession())
+    } else {
+      setActiveSession(null)
+    }
+  }, [paymentTarget, getAnyOpenSession])
+
   // ⭐ Filtros
   const filtered = useMemo(() => {
     let list = [...credits]
 
-    // Filtro rápido
     if (quickFilter !== 'all') {
       list = list.filter((c) => c.status === quickFilter)
     }
 
-    // Búsqueda
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((c) =>
@@ -61,7 +71,6 @@ export default function Credits() {
       )
     }
 
-    // Orden
     const dir = sort.direction === 'asc' ? 1 : -1
     list.sort((a, b) => {
       const va = a[sort.field] ?? ''
@@ -88,7 +97,6 @@ export default function Credits() {
     cancelled: credits.filter((c) => c.status === 'cancelled').length,
   }), [credits])
 
-  // ⭐ Handlers
   const handleNavigate = (key) => navigate(key)
 
   const handleCreate = async ({ customerId, amount, dueDate, notes }) => {
@@ -97,13 +105,11 @@ export default function Credits() {
       const customer = wholesales.find((w) => w.id === customerId)
       if (!customer) throw new Error('Cliente no encontrado')
 
-      // Validar que no tenga crédito activo
       const existing = credits.find(
         (c) => c.customerId === customerId && (c.status === 'active' || c.status === 'overdue'),
       )
       if (existing) throw new Error('Este cliente ya tiene un crédito activo.')
 
-      // Validar monto contra creditLimit
       const limit = Number(customer.creditLimit) || 0
       if (amount > limit) {
         throw new Error(`El monto supera el límite de $${limit.toLocaleString('es-MX')}.`)
@@ -136,16 +142,18 @@ export default function Credits() {
     }
   }
 
-  const handlePayment = async ({ creditId, amount, method, notes }) => {
+  const handlePayment = async ({ creditId, amount, method, notes, cashSessionId }) => {
     setSubmitting(true)
     try {
-      const session = getAnyOpenSession()
-      if (!session) {
-        throw new Error('Debes abrir una caja antes de cobrar.')
+      // 🆕 Validación: efectivo requiere caja
+      if (method === 'cash' && !cashSessionId) {
+        throw new Error('Debes abrir una caja antes de abonar en efectivo.')
       }
 
       const credit = credits.find((c) => c.id === creditId)
       if (!credit) throw new Error('Crédito no encontrado')
+
+      const wasFullPayment = Math.abs(amount - Number(credit.outstanding || 0)) < 0.01
 
       await registerPayment({
         payment: {
@@ -154,7 +162,7 @@ export default function Credits() {
           amount,
           method,
           notes,
-          cashSessionId: session.id,
+          cashSessionId: cashSessionId || null,
         },
         receivedBy: {
           id: user?.id,
@@ -166,11 +174,13 @@ export default function Credits() {
       setPaymentTarget(null)
       setDetailTarget(null)
       setToast({
-        title: '✅ Pago registrado',
-        description: `$${amount.toLocaleString('es-MX')} recibidos de ${credit.customerName}.`,
+        title: wasFullPayment ? '✅ Crédito liquidado' : '✅ Abono registrado',
+        description: wasFullPayment
+          ? `${credit.customerName} liquidó su deuda de $${amount.toLocaleString('es-MX')}.`
+          : `$${amount.toLocaleString('es-MX')} abonados. Saldo pendiente: $${(Number(credit.outstanding) - amount).toLocaleString('es-MX')}.`,
       })
     } catch (err) {
-      setToast({ title: 'Error al cobrar', description: err.message })
+      setToast({ title: 'Error al abonar', description: err.message })
     } finally {
       setSubmitting(false)
     }
@@ -194,7 +204,6 @@ export default function Credits() {
     navigate('wholesale-edit', { id: credit.customerId })
   }
 
-  // ⭐ Clientes disponibles para otorgar crédito (sin crédito activo)
   const customersAvailable = useMemo(() => {
     return wholesales.filter((w) => {
       if (!w.creditEnabled) return false
@@ -280,6 +289,7 @@ export default function Credits() {
         onClose={() => setPaymentTarget(null)}
         onSubmit={handlePayment}
         submitting={submitting}
+        cashSession={activeSession}
       />
 
       <CreditDetailDrawer

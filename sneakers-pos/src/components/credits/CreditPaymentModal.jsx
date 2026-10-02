@@ -1,6 +1,6 @@
 // src/components/credits/CreditPaymentModal.jsx
 import { useEffect, useState } from 'react'
-import { X, Banknote, CreditCard, ArrowRightLeft } from 'lucide-react'
+import { X, Banknote, CreditCard, ArrowRightLeft, HandCoins, AlertTriangle } from 'lucide-react'
 import Button from '../common/Button'
 
 const METHODS = [
@@ -11,7 +11,14 @@ const METHODS = [
 
 const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 })}`
 
-export default function CreditPaymentModal({ open, credit, onClose, onSubmit, submitting }) {
+export default function CreditPaymentModal({
+  open,
+  credit,
+  onClose,
+  onSubmit,
+  submitting,
+  cashSession = null,   // 🆕 sesión de caja activa (opcional)
+}) {
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('cash')
   const [notes, setNotes] = useState('')
@@ -33,15 +40,20 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
 
   const isFullPayment = Math.abs(amountNum - outstanding) < 0.01
 
+  // 🆕 Solo advertimos si es efectivo y no hay caja abierta
+  const needsCashSession = method === 'cash' && !cashSession
+  const canSubmitFinal = canSubmit && !needsCashSession
+
   if (!open || !credit) return null
 
   const handleSubmit = () => {
-    if (!canSubmit) return
+    if (!canSubmitFinal) return
     onSubmit?.({
       creditId: credit.id,
       amount: amountNum,
       method,
       notes: notes.trim() || null,
+      cashSessionId: cashSession?.id || null,  // 🆕
     })
   }
 
@@ -50,9 +62,12 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
       <div className="w-full max-w-lg rounded-xl overflow-hidden bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border shadow-cardHover">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-dark-border">
-          <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text">
-            Registrar pago
-          </h3>
+          <div className="flex items-center gap-2">
+            <HandCoins size={16} className="text-brand-blue" strokeWidth={2} />
+            <h3 className="text-sm font-semibold text-brand-black dark:text-dark-text">
+              Abonar a crédito
+            </h3>
+          </div>
           <button
             onClick={onClose}
             disabled={submitting}
@@ -83,20 +98,36 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
           </p>
         </div>
 
+        {/* 🆕 Aviso de caja */}
+        {needsCashSession && (
+          <div className="
+            flex items-start gap-2 px-5 py-3
+            bg-amber-50 dark:bg-amber-950/30
+            border-b border-amber-200 dark:border-amber-900/50
+            text-amber-800 dark:text-amber-300 text-xs
+          ">
+            <AlertTriangle size={14} strokeWidth={2.2} className="mt-0.5 shrink-0" />
+            <span>
+              No hay una <strong>caja abierta</strong>. Abre una caja antes de registrar abonos en efectivo,
+              o cambia el método a <strong>Tarjeta</strong> o <strong>Transferencia</strong>.
+            </span>
+          </div>
+        )}
+
         {/* Contenido */}
         <div className="p-5 space-y-4">
           {/* Monto */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-muted">
-                Monto a pagar
+                Monto a abonar
               </label>
               <button
                 type="button"
                 onClick={() => setAmount(String(outstanding))}
                 className="text-[11px] font-semibold text-brand-blue hover:underline"
               >
-                Pagar todo
+                Abonar todo
               </button>
             </div>
             <input
@@ -159,6 +190,14 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
                 )
               })}
             </div>
+
+            {/* 🆕 Info de caja si hay sesión */}
+            {method === 'cash' && cashSession && (
+              <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-2 font-medium">
+                ✅ Entrará a caja: <strong>{cashSession.cashLabel || cashSession.branch || 'Caja'}</strong>
+                {cashSession.responsibleName ? ` · ${cashSession.responsibleName}` : ''}
+              </p>
+            )}
           </div>
 
           {/* Notas */}
@@ -171,7 +210,7 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               disabled={submitting}
-              placeholder="Ej. Pago parcial acordado"
+              placeholder="Ej. Abono parcial acordado"
               className="
                 w-full px-3 py-2 rounded-lg text-sm resize-none
                 bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
@@ -191,9 +230,10 @@ export default function CreditPaymentModal({ open, credit, onClose, onSubmit, su
             variant="primary"
             onClick={handleSubmit}
             loading={submitting}
-            disabled={!canSubmit || submitting}
+            disabled={!canSubmitFinal || submitting}
+            icon={!submitting ? HandCoins : undefined}
           >
-            {submitting ? 'Procesando…' : `Cobrar ${fmt(amountNum)}`}
+            {submitting ? 'Procesando…' : `Abonar ${fmt(amountNum)}`}
           </Button>
         </div>
       </div>

@@ -93,6 +93,7 @@ export default function ProductVariantsSection({
   productPrice = '',
   onChangeVariantsBySize,
   onChangeVariantsBulk,
+  onEditVariantSize,          // 🆕 (opcional) editar talla sin regenerar QR
 }) {
   const [newSize, setNewSize] = useState('')
   const [printOpen, setPrintOpen] = useState(false)
@@ -255,6 +256,14 @@ export default function ProductVariantsSection({
   }
 
   const totalStock = variants.reduce((acc, v) => acc + (Number(v.stock) || 0), 0)
+
+  // 🆕 Editar talla in-place (no toca sku ni barcode)
+  const handleEditSize = (variant, rawValue) => {
+    if (!onEditVariantSize) return
+    const next = String(rawValue ?? '')
+    // Permitimos escribir libremente; el padre decide si es válido
+    onEditVariantSize(variant.id, next)
+  }
 
   return (
     <>
@@ -605,7 +614,25 @@ export default function ProductVariantsSection({
                             className="w-3 h-3 rounded-full border border-black/10 shrink-0"
                             style={{ backgroundColor: getColorHex(v.color) }}
                           />
-                          {v.label}
+                          {/* 🆕 Talla editable in-place (no regenera QR) */}
+                          {onEditVariantSize ? (
+                            <input
+                              type="text"
+                              value={v.size ?? ''}
+                              onChange={(e) => handleEditSize(v, e.target.value)}
+                              className="
+                                w-16 h-7 px-1.5 rounded-md text-xs font-semibold text-center
+                                bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
+                                border border-gray-200 dark:border-dark-border
+                                focus:border-brand-blue outline-none
+                              "
+                              title="Editar talla (no regenera el código)"
+                            />
+                          ) : (
+                            <span>{v.size}</span>
+                          )}
+                          <span className="text-gray-400">/</span>
+                          <span>{v.color}</span>
                         </span>
                       </td>
                       <td className="px-3 py-2 text-gray-700 dark:text-dark-muted text-xs font-mono whitespace-nowrap">

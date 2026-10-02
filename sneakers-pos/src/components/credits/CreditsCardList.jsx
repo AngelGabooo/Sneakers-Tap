@@ -11,6 +11,11 @@ const fmtDate = (iso) => {
   return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
 }
 
+const daysUntil = (iso) => {
+  if (!iso) return null
+  return Math.ceil((new Date(iso) - new Date()) / (1000 * 60 * 60 * 24))
+}
+
 const STATUS_CONFIG = {
   active:    { label: 'Activo',    variant: 'info',    icon: Clock },
   overdue:   { label: 'Vencido',   variant: 'danger',  icon: AlertTriangle },
@@ -49,6 +54,9 @@ export default function CreditsCardList({ credits, loading, onViewDetail, onPay 
       {credits.map((c) => {
         const cfg = STATUS_CONFIG[c.status] || STATUS_CONFIG.active
         const StatusIcon = cfg.icon
+        const days = daysUntil(c.dueDate)
+        const isOverdue = c.status === 'overdue'
+        const hasDebt = Number(c.outstanding || 0) > 0
 
         return (
           <Card key={c.id}>
@@ -73,17 +81,26 @@ export default function CreditsCardList({ credits, loading, onViewDetail, onPay 
                 <p className="text-sm font-bold text-brand-black dark:text-dark-text">{fmt(c.amount)}</p>
               </div>
               <div>
-                <p className="text-[10px] uppercase text-gray-400 dark:text-dark-muted">Pagado</p>
+                <p className="text-[10px] uppercase text-gray-400 dark:text-dark-muted">Abonado</p>
                 <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmt(c.paidAmount)}</p>
               </div>
               <div>
-                <p className="text-[10px] uppercase text-gray-400 dark:text-dark-muted">Saldo</p>
-                <p className="text-sm font-bold text-brand-black dark:text-dark-text">{fmt(c.balance)}</p>
+                <p className="text-[10px] uppercase text-gray-400 dark:text-dark-muted">Deuda</p>
+                <p className={`text-sm font-bold ${hasDebt ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                  {fmt(c.outstanding || 0)}
+                </p>
               </div>
             </div>
 
             <p className="text-[11px] text-gray-500 dark:text-dark-muted mb-3">
               Vence: <span className="font-medium text-brand-black dark:text-dark-text">{fmtDate(c.dueDate)}</span>
+              {c.status !== 'paid' && c.status !== 'cancelled' && days !== null && (
+                <span className={`ml-2 font-medium ${
+                  isOverdue ? 'text-brand-red' : days <= 3 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'
+                }`}>
+                  {isOverdue ? `· Hace ${Math.abs(days)} días` : days === 0 ? '· Vence hoy' : `· ${days} días`}
+                </span>
+              )}
             </p>
 
             <div className="flex gap-2">
@@ -98,14 +115,16 @@ export default function CreditsCardList({ credits, loading, onViewDetail, onPay 
                 <button
                   type="button"
                   onClick={() => onPay?.(c)}
+                  disabled={!hasDebt}
                   className="
                     flex-1 h-9 rounded-lg text-xs font-bold text-white
                     bg-brand-blue hover:bg-blue-700 transition-colors
                     inline-flex items-center justify-center gap-1
+                    disabled:opacity-40 disabled:cursor-not-allowed
                   "
                 >
                   <HandCoins size={12} strokeWidth={2.4} />
-                  Cobrar
+                  Abonar
                 </button>
               )}
             </div>

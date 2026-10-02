@@ -47,17 +47,21 @@ function migrateToVariantsBySize(product) {
 /**
  * Construye la lista de variantes a partir del mapa { size: [colors] }.
  *
- * Fusiona 3 fuentes para preservar el stock:
- *   1) persistedVariants → variantes guardadas en el producto (Supabase)
- *   2) previous          → variantes que ya están en el estado local (edición en curso)
+ * Estrategia de preservación (edición):
+ *   1) Buscar por id exacto `${size}-${color}` (caso normal).
+ *   2) Si no existe, buscar por `color` en las variantes previas
+ *      (asume que la talla cambió: ej. 8 → 28) y REUTILIZAR su barcode/sku.
+ *   3) Solo si no se encuentra de ninguna forma, generar sku/barcode nuevos.
  *
- * La fuente 2 tiene prioridad sobre la 1 porque refleja los cambios que el
- * usuario hizo en esta sesión de edición.
+ * Además, se conserva el `dbId` (UUID real en Supabase) para que el UPDATE
+ * pegue sobre la fila existente y no borre/reinserte variantes.
+ *
+ * Esto garantiza que un cambio de talla NO rompa el QR ya impreso.
  */
 function variantsFromSizeColorMap(variantsBySize, baseSku, previous = [], persistedVariants = []) {
   if (!baseSku) return []
 
-  // Combinamos: primero los persistidos (base), luego los del estado actual (edición)
+  // Mapa por id exacto (size-color)
   const prevMap = new Map()
   persistedVariants.forEach((v) => {
     if (!v?.size || !v?.color) return
@@ -68,22 +72,51 @@ function variantsFromSizeColorMap(variantsBySize, baseSku, previous = [], persis
     prevMap.set(`${v.size}-${v.color}`, v)
   })
 
+  // Mapa por color → variantes (para fallback cuando cambia la talla)
+  const byColorMap = new Map()
+  const registerByColor = (v) => {
+    if (!v?.color) return
+    const arr = byColorMap.get(v.color) || []
+    arr.push(v)
+    byColorMap.set(v.color, arr)
+  }
+  persistedVariants.forEach(registerByColor)
+  previous.forEach(registerByColor)
+
   const list = []
+  const usedDbIds = new Set()
+
   Object.entries(variantsBySize).forEach(([size, colors]) => {
     ;(colors || []).forEach((color) => {
       const id = `${size}-${color}`
-      const sku = buildVariantSku(baseSku, size, color)
-      const barcode = buildVariantBarcode(sku)
       const prev = prevMap.get(id)
 
+      // Fallback: si la talla cambió, reutilizamos por color
+      // (solo si hay una única candidata con ese color y no se usó ya)
+      let reused = prev
+      if (!reused) {
+        const candidates = (byColorMap.get(color) || []).filter(
+          (c) => c?.barcode && !usedDbIds.has(c?.dbId || c?.id)
+        )
+        reused = candidates.length === 1 ? candidates[0] : null
+      }
+
+      const fallbackSku = buildVariantSku(baseSku, size, color)
+      const fallbackBarcode = String(buildVariantBarcode(fallbackSku))
+
+      const reusedId = reused?.dbId || reused?.id
+      if (reusedId) usedDbIds.add(reusedId)
+
       list.push({
-        id,
+        id,                                 // id lógico local (para React keys)
+        dbId: reused?.dbId || reused?.id || null,  // 🆕 UUID real en BD
         label: `${size} / ${color}`,
         size,
         color,
-        sku: prev?.sku || sku,
-        barcode: prev?.barcode || String(barcode),
-        stock: prev?.stock ?? 0,
+        // ✅ Conservamos SKU y barcode previos → el QR impreso sigue válido
+        sku: reused?.sku || fallbackSku,
+        barcode: reused?.barcode || fallbackBarcode,
+        stock: reused?.stock ?? 0,
       })
     })
   })
@@ -195,6 +228,48 @@ export default function ProductEdit() {
     setDirty(true)
   }
 
+  // 🆕 Editar talla in-place: mueve el color de talla vieja a nueva
+  //    conservando SIEMPRE sku y barcode originales de la variante.
+  const handleEditVariantSize = (variantId, rawValue) => {
+    const trimmed = String(rawValue || '').trim()
+    setVariants((list) => {
+      const target = list.find((v) => v.id === variantId)
+      if (!target) return list
+
+      const oldSize = target.size
+      // Si está vacío, no propagamos (deja que el usuario siga escribiendo)
+      if (!trimmed) {
+        return list.map((v) =>
+          v.id === variantId ? { ...v, size: '', label: ` / ${v.color}` } : v
+        )
+      }
+      if (trimmed === oldSize) return list
+
+      // Actualizar el mapa variantsBySize moviendo el color
+      setVariantsBySize((prevMap) => {
+        const next = { ...prevMap }
+        const colorsOld = next[oldSize] || []
+        if (colorsOld.includes(target.color)) {
+          next[oldSize] = colorsOld.filter((c) => c !== target.color)
+          if (next[oldSize].length === 0) delete next[oldSize]
+        }
+        const colorsNew = next[trimmed] || []
+        if (!colorsNew.includes(target.color)) {
+          next[trimmed] = [...colorsNew, target.color]
+        }
+        return next
+      })
+
+      // ⚠️ NO tocamos sku ni barcode
+      return list.map((v) =>
+        v.id === variantId
+          ? { ...v, size: trimmed, label: `${trimmed} / ${v.color}` }
+          : v
+      )
+    })
+    setDirty(true)
+  }
+
   const handleRegenerateBarcode = () => {
     if (!form.sku) return
     barcodeAutoRef.current = true
@@ -237,12 +312,14 @@ export default function ProductEdit() {
         finalImages = await storageService.uploadMany(images, 'products')
       }
 
-      // 2. Preparar variantes (preservando stock)
+      // 2. Preparar variantes (preservando stock + UUID real de BD)
       const safeVariants = variants.map((v) => {
         const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
         const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
         return {
           ...v,
+          // 🔑 Si tenemos dbId (UUID real), lo usamos como id para que el UPDATE pegue
+          id: v.dbId || v.id,
           sku: String(variantSku || ''),
           barcode: String(variantBarcode || ''),
           stock: Number(v.stock) || 0,
@@ -430,6 +507,7 @@ export default function ProductEdit() {
                   })
                   setDirty(true)
                 }}
+                onEditVariantSize={handleEditVariantSize}
               />
 
               <ProductInventorySection

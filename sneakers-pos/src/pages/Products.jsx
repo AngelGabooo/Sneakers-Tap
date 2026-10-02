@@ -1,5 +1,5 @@
 // src/pages/Products.jsx
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProductsHeader from '../components/products/ProductsHeader'
 import ProductsStats from '../components/products/ProductsStats'
@@ -110,15 +110,38 @@ export default function Products() {
   const total = filtered.length
   const filtersActive = useMemo(() => quickFilter !== 'all', [quickFilter])
 
+  // ⭐ FIX: paginación real. Solo se renderizan `perPage` items.
+  const paged = useMemo(() => {
+    const start = (page - 1) * perPage
+    return filtered.slice(start, start + perPage)
+  }, [filtered, page, perPage])
+
+  // ⭐ FIX: si el total cambia y la página actual queda fuera de rango, volver a la 1.
+  //    Ej: estás en página 5, buscas algo que solo tiene 3 resultados → vuelve a página 1.
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(total / perPage))
+    if (page > totalPages) setPage(1)
+  }, [total, perPage, page])
+
+  // ⭐ FIX: al cambiar de página o de filtros, limpiar selección.
+  //    Evita que borres en bulk productos que no ves en pantalla.
+  useEffect(() => {
+    setSelectedIds([])
+  }, [page, perPage, search, quickFilter, sort])
+
   const handleToggleSelect = (id) => {
     setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
   }
   const handleToggleSelectAll = (checked) => {
-    setSelectedIds(checked ? filtered.map((p) => p.id) : [])
+    // ⭐ FIX: solo selecciona los visibles (los del slice), no todos los filtrados.
+    setSelectedIds(checked ? paged.map((p) => p.id) : [])
   }
 
   const handleNavigate = (key) => navigate(key)
-  const handleSortChange = (field, direction) => setSort({ field, direction })
+  const handleSortChange = (field, direction) => {
+    setSort({ field, direction })
+    setPage(1)  // ⭐ resetear a página 1 al cambiar orden (evita "páginas fantasma")
+  }
 
   const goToCreate = () => navigate('product-new')
   const goToEdit = (id) => navigate('product-edit', { id })
@@ -134,24 +157,15 @@ export default function Products() {
   // ACCIONES
   // ============================================================
 
-  /**
-   * Abre el modal de confirmación para eliminar 1 producto.
-   */
   const handleDelete = (id) => {
     setDeleteConfirm({ open: true, ids: [id] })
   }
 
-  /**
-   * Abre el modal de confirmación para eliminar los seleccionados.
-   */
   const handleBulkDelete = () => {
     if (selectedIds.length === 0) return
     setDeleteConfirm({ open: true, ids: [...selectedIds] })
   }
 
-  /**
-   * Ejecuta la eliminación.
-   */
   const handleConfirmDelete = async () => {
     setDeleting(true)
     try {
@@ -175,9 +189,6 @@ export default function Products() {
     }
   }
 
-  /**
-   * Alternar activo/inactivo de un producto individual.
-   */
   const handleToggleActive = async (id) => {
     const product = products.find((p) => p.id === id)
     if (!product) return
@@ -197,9 +208,6 @@ export default function Products() {
     }
   }
 
-  /**
-   * Bulk: cambiar status (activar o desactivar).
-   */
   const handleBulkStatus = (status) => {
     if (selectedIds.length === 0) return
     setStatusConfirm({ open: true, ids: [...selectedIds], status })
@@ -230,8 +238,6 @@ export default function Products() {
   }
 
   const handleDuplicate = (id) => {
-    const original = products.find((p) => p.id === id)
-    if (!original) return
     setToast({
       title: 'Duplicar producto',
       description: 'Esta función estará disponible próximamente.',
@@ -268,7 +274,7 @@ export default function Products() {
       />
 
       <ProductsTable
-        items={filtered}
+        items={paged}  
         loading={false}
         selectedIds={selectedIds}
         onToggleSelect={handleToggleSelect}

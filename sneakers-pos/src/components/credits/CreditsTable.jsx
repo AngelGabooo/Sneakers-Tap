@@ -87,7 +87,7 @@ export default function CreditsTable({
               <Th onClick={() => handleSort('customerName')} sort={sort} field="customerName">Cliente</Th>
               <Th align="right" onClick={() => handleSort('amount')} sort={sort} field="amount">Otorgado</Th>
               <Th align="right">Pagado</Th>
-              <Th align="right">Saldo</Th>
+              <Th align="right">Deuda</Th>
               <Th onClick={() => handleSort('dueDate')} sort={sort} field="dueDate">Vence</Th>
               <Th>Estado</Th>
               <Th align="right">Acciones</Th>
@@ -99,6 +99,7 @@ export default function CreditsTable({
               const StatusIcon = cfg.icon
               const days = daysUntil(c.dueDate)
               const isOverdue = c.status === 'overdue'
+              const hasDebt = Number(c.outstanding || 0) > 0
 
               return (
                 <tr
@@ -127,8 +128,10 @@ export default function CreditsTable({
                   <td className="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">
                     {fmt(c.paidAmount)}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-brand-black dark:text-dark-text">
-                    {fmt(c.balance)}
+                  <td className="px-4 py-3 text-right font-bold">
+                    <span className={hasDebt ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}>
+                      {fmt(c.outstanding || 0)}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <p className="text-brand-black dark:text-dark-text">
@@ -165,14 +168,17 @@ export default function CreditsTable({
                         <button
                           type="button"
                           onClick={() => onPay?.(c)}
+                          disabled={!hasDebt}
                           className="
                             inline-flex items-center gap-1 h-7 px-2.5 rounded-md
                             text-[11px] font-semibold
                             text-white bg-brand-blue hover:bg-blue-700 transition-colors
+                            disabled:opacity-40 disabled:cursor-not-allowed
                           "
+                          title={hasDebt ? 'Registrar abono' : 'Sin deuda pendiente'}
                         >
                           <HandCoins size={11} strokeWidth={2.4} />
-                          Cobrar
+                          Abonar
                         </button>
                       )}
                     </div>
