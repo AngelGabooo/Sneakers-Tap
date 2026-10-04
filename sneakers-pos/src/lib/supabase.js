@@ -10,28 +10,33 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    // ⭐ FIX: en producción SPA no necesitamos detectar sesión en URL.
-    //    Esto evita refresh innecesario en cada navegación/recarga.
-    detectSessionInUrl: false,
-    storageKey: 'sneakers-auth',
-    flowType: 'pkce',
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
-      // ⭐ FIX: heartbeat más espaciado (default 30s → 60s)
-      //    Reduce ~50% los logs de Realtime.
-      heartbeatIntervalMs: 60000,
+// ⭐ FIX: singleton global para evitar Multiple GoTrueClient instances
+//    Esto resuelve el warning que viste en DevTools:
+//    "GoTrueClient@sb-... Multiple GoTrueClient instances detected"
+let _supabase = globalThis.__supabase_client__
+
+if (!_supabase) {
+  _supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      storageKey: 'sneakers-auth',
+      flowType: 'pkce',
     },
-  },
-})
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+        heartbeatIntervalMs: 60000,
+      },
+    },
+  })
+  globalThis.__supabase_client__ = _supabase
+}
+
+export const supabase = _supabase
 
 // ⭐ Detectar eventos de auth para debug
-//    (los console.log en producción no afectan al bundle final)
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'TOKEN_REFRESHED') {
     console.log('🔄 Token refrescado')

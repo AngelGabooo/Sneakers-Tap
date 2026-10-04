@@ -1,21 +1,9 @@
 // src/hooks/useOnlineStatus.js
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
-/**
- * Hook que detecta si hay conexión REAL a internet.
- *
- * ⚠️  navigator.onLine NO es confiable (dice "true" si estás conectado
- *     al WiFi aunque el WiFi no tenga internet).
- *
- * Solución: hacemos un ping HTTP al endpoint /rest/v1/ de Supabase.
- * Si responde en < 5s → online. Si falla → offline.
- */
-
-const PING_URL =
-  (import.meta.env.VITE_SUPABASE_URL || '') + '/rest/v1/'
-
-const PING_INTERVAL_MS = 30000   // 30 segundos
-const PING_TIMEOUT_MS = 5000     // 5 segundos máximo
+const PING_URL = (import.meta.env.VITE_SUPABASE_URL || '') + '/rest/v1/'
+const PING_INTERVAL_MS = 5 * 60 * 1000   // ⭐ 5 minutos (antes 30s)
+const PING_TIMEOUT_MS = 5000
 
 async function pingInternet() {
   if (!PING_URL.startsWith('http')) return false
@@ -25,9 +13,10 @@ async function pingInternet() {
 
   try {
     await fetch(PING_URL, {
-      method: 'HEAD',
+      method: 'GET',
       signal: controller.signal,
       cache: 'no-store',
+      credentials: 'omit',
     })
     return true
   } catch {
@@ -39,33 +28,39 @@ async function pingInternet() {
 
 export function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    let mounted = true
+    mountedRef.current = true
     let intervalId = null
 
     async function check() {
+      // ⭐ No pingear si la pestaña no está visible
+      if (document.hidden) return
       const ok = await pingInternet()
-      if (mounted) setIsOnline(ok)
+      if (mountedRef.current) setIsOnline(ok)
     }
 
-    // Eventos del navegador (rápidos pero poco confiables)
     const handleOnline = () => check()
     const handleOffline = () => {
-      if (mounted) setIsOnline(false)
+      if (mountedRef.current) setIsOnline(false)
+    }
+    const handleVisibility = () => {
+      if (!document.hidden) check()
     }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    document.addEventListener('visibilitychange', handleVisibility)
 
-    // Chequeo inicial + polling cada 30s
     check()
     intervalId = setInterval(check, PING_INTERVAL_MS)
 
     return () => {
-      mounted = false
+      mountedRef.current = false
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      document.removeEventListener('visibilitychange', handleVisibility)
       if (intervalId) clearInterval(intervalId)
     }
   }, [])
