@@ -3,7 +3,11 @@ import { supabase } from '../lib/supabase'
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
 
-// ⭐ NUEVO: detección iOS
+// ⭐ FIX: guard global para evitar upserts repetidos
+let lastUpsertAt = 0
+let lastUpsertEndpoint = null
+const UPSERT_COOLDOWN_MS = 5 * 60 * 1000
+
 function isIOS() {
   return (
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -11,7 +15,6 @@ function isIOS() {
   )
 }
 
-// ⭐ NUEVO: ¿corre como PWA instalada?
 function isStandalone() {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -19,7 +22,6 @@ function isStandalone() {
   )
 }
 
-// -------------------- (SIN CAMBIOS) --------------------
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -31,10 +33,6 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray
 }
 
-/**
- * ¿El navegador soporta Web Push?
- * ⭐ AHORA: en iOS, solo si está instalada como PWA.
- */
 export function isPushSupported() {
   const hasAPIs =
     typeof window !== 'undefined' &&
@@ -44,19 +42,13 @@ export function isPushSupported() {
 
   if (!hasAPIs) return false
   if (isIOS() && !isStandalone()) return false
-
   return true
 }
 
-/**
- * ⭐ NUEVO: ¿Estamos en iOS pero NO instalada como PWA?
- * Útil para mostrar mensaje específico en la UI.
- */
 export function needsIOSInstall() {
   return isIOS() && !isStandalone()
 }
 
-// -------------------- (SIN CAMBIOS) --------------------
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return null
   try {
@@ -82,10 +74,6 @@ export async function getExistingSubscription() {
   }
 }
 
-/**
- * Suscribe al usuario a Web Push.
- * ⭐ Ahora guarda la VAPID key en IndexedDB para el SW (iOS).
- */
 export async function subscribeToPush(userId) {
   if (!isPushSupported()) {
     if (needsIOSInstall()) return { ok: false, reason: 'ios-needs-install' }
@@ -94,21 +82,17 @@ export async function subscribeToPush(userId) {
   if (!VAPID_PUBLIC_KEY) return { ok: false, reason: 'no-vapid' }
 
   try {
-    // ⭐ NUEVO: guardar VAPID en IndexedDB para que el SW pueda re-suscribir
     await saveVapidKeyToIDB(VAPID_PUBLIC_KEY)
 
-    // 1. Pedir permiso
     const permission = await Notification.requestPermission()
     if (permission !== 'granted') return { ok: false, reason: 'denied' }
 
-    // 2. Registrar SW (o esperar)
     let registration = await navigator.serviceWorker.getRegistration()
     if (!registration) {
       registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
     }
     await navigator.serviceWorker.ready
 
-    // 3. Suscribirse al push
     let subscription = await registration.pushManager.getSubscription()
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
@@ -119,7 +103,17 @@ export async function subscribeToPush(userId) {
 
     const subJson = subscription.toJSON()
 
-    // 4. Guardar en Supabase
+    // ⭐ FIX: guard contra upserts repetidos.
+    //    Si el endpoint es el mismo y lo hicimos hace <5 min, no re-hacemos el upsert.
+    const now = Date.now()
+    if (
+      subJson.endpoint === lastUpsertEndpoint &&
+      now - lastUpsertAt < UPSERT_COOLDOWN_MS
+    ) {
+      console.log('⏭️ Upsert push_subscriptions omitido (cooldown)')
+      return { ok: true, cached: true }
+    }
+
     const { error } = await supabase
       .from('push_subscriptions')
       .upsert(
@@ -135,6 +129,9 @@ export async function subscribeToPush(userId) {
 
     if (error) throw error
 
+    lastUpsertAt = now
+    lastUpsertEndpoint = subJson.endpoint
+
     console.log('✅ Suscrito a Web Push')
     return { ok: true }
   } catch (err) {
@@ -143,7 +140,6 @@ export async function subscribeToPush(userId) {
   }
 }
 
-// ⭐ NUEVO helper
 function saveVapidKeyToIDB(vapidPublic) {
   return new Promise((resolve) => {
     const req = indexedDB.open('sneakers-push', 1)
@@ -168,7 +164,6 @@ function saveVapidKeyToIDB(vapidPublic) {
   })
 }
 
-// -------------------- (SIN CAMBIOS) --------------------
 export async function unsubscribeFromPush() {
   if (!isPushSupported()) return { ok: false, reason: 'unsupported' }
   try {
@@ -196,7 +191,6 @@ export async function getPushStatus() {
   return sub ? 'subscribed' : 'granted'
 }
 
-// -------------------- (SIN CAMBIOS) --------------------
 export function listenForSubscriptionChanges(userId) {
   if (typeof navigator === 'undefined') return () => {}
   if (!('serviceWorker' in navigator)) return () => {}
@@ -206,6 +200,16 @@ export function listenForSubscriptionChanges(userId) {
 
     const sub = event.data.subscription
     console.log('🔄 SW renovó la suscripción, guardando en Supabase…')
+
+    // ⭐ FIX: guard contra upserts repetidos en este handler también.
+    const now = Date.now()
+    if (
+      sub.endpoint === lastUpsertEndpoint &&
+      now - lastUpsertAt < UPSERT_COOLDOWN_MS
+    ) {
+      console.log('⏭️ Upsert (SW change) omitido (cooldown)')
+      return
+    }
 
     const { error } = await supabase.from('push_subscriptions').upsert(
       {
@@ -222,6 +226,8 @@ export function listenForSubscriptionChanges(userId) {
     if (error) {
       console.error('❌ Error guardando suscripción renovada:', error)
     } else {
+      lastUpsertAt = now
+      lastUpsertEndpoint = sub.endpoint
       console.log('✅ Suscripción renovada guardada en Supabase')
     }
   }

@@ -11,7 +11,6 @@ import { authService } from '../services/authService'
 import { profilesService } from '../services/profilesService'
 import { usersService } from '../services/usersService'
 import { getPushStatus, subscribeToPush } from '../utils/webPush'
-// ⭐ NUEVO: helpers de acceso offline
 import {
   saveOfflineSnapshot,
   readOfflineSnapshot,
@@ -23,9 +22,11 @@ const AuthContext = createContext(null)
 
 const SESSION_KEY = 'sneakers-current-session-id'
 
-/**
- * Mapea un perfil de Supabase a la estructura que usa la app.
- */
+// ⭐ FIX: guard global para no re-suscribir push en cada render
+let pushSubscribeInFlight = false
+let pushSubscribeLastAt = 0
+const PUSH_RESUBSCRIBE_COOLDOWN = 5 * 60 * 1000 // 5 minutos
+
 function mapProfileToUser(profile, authUser) {
   if (!profile) return null
   return {
@@ -44,9 +45,6 @@ function mapProfileToUser(profile, authUser) {
   }
 }
 
-/**
- * Detecta el tipo de dispositivo a partir del user agent.
- */
 function detectDevice(ua) {
   if (!ua) return 'Desconocido'
   const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua)
@@ -69,13 +67,15 @@ function detectDevice(ua) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
-  // ⭐ NUEVO: estado de conexión para exponerlo a la UI
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   )
   const sessionIdRef = useRef(null)
 
-  // ⭐ NUEVO: escuchar cambios de red
+  // ⭐ FIX: trackear el ID del último usuario para el que ya registramos sesión
+  //    así evitamos crear sesiones duplicadas cuando loadProfile se re-ejecuta.
+  const lastSessionUserIdRef = useRef(null)
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const onOnline = () => setIsOffline(false)
@@ -88,9 +88,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  /**
-   * Carga el perfil completo del usuario autenticado.
-   */
   const loadProfile = useCallback(async (authUser) => {
     if (!authUser) {
       setUser(null)
@@ -123,13 +120,18 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  /**
-   * ⭐ Registra una nueva sesión en Supabase.
-   *    Guarda el sessionId para poder cerrarla en logout.
-   *    `startedOffline` = true cuando la sesión se creó sin internet
-   *    y se está sincronizando al volver la conexión.
-   */
   const startSession = useCallback(async (userId, { startedOffline = false } = {}) => {
+    // ⭐ FIX: guard para no crear sesiones duplicadas para el mismo usuario.
+    if (lastSessionUserIdRef.current === userId && sessionIdRef.current) {
+      console.log('♻️ Sesión ya registrada para este usuario, omitiendo')
+      return
+    }
+    // ⭐ FIX: guard adicional — si ya hay una sesión activa, no crear otra.
+    if (sessionIdRef.current) {
+      console.log('♻️ Sesión activa ya existe, omitiendo')
+      return
+    }
+
     try {
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : null
       const device = detectDevice(ua)
@@ -138,12 +140,13 @@ export function AuthProvider({ children }) {
         userId,
         device,
         userAgent: ua,
-        ip: null, // no lo tenemos desde el cliente
-        startedOffline, // ⭐ NUEVO
+        ip: null,
+        startedOffline,
       })
 
       if (session?.id) {
         sessionIdRef.current = session.id
+        lastSessionUserIdRef.current = userId
         try { sessionStorage.setItem(SESSION_KEY, session.id) } catch {}
         console.log(
           startedOffline ? '🟡 Sesión offline sincronizada:' : '🟢 Sesión registrada:',
@@ -157,9 +160,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  /**
-   * ⭐ Cierra la sesión activa en Supabase.
-   */
   const endSession = useCallback(async (reason = 'Logout') => {
     try {
       let sessionId = sessionIdRef.current
@@ -170,6 +170,7 @@ export function AuthProvider({ children }) {
 
       await usersService.endSession(sessionId, reason)
       sessionIdRef.current = null
+      lastSessionUserIdRef.current = null
       try { sessionStorage.removeItem(SESSION_KEY) } catch {}
       console.log('🔴 Sesión cerrada:', reason)
     } catch (err) {
@@ -177,32 +178,18 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  /**
-   * ⭐ NUEVO: Login OFFLINE.
-   *    Valida credenciales contra el snapshot guardado en el dispositivo.
-   *    Se declara ANTES de `login` para que esté disponible cuando
-   *    `login` la invoque.
-   */
   const offlineLogin = useCallback(async ({ email, password }) => {
     const res = await validateOfflineLogin(email, password)
     if (!res.ok) return res
-
-    // Cargamos el user guardado como sesión activa.
     setUser(res.user)
-    // No creamos sesión en Supabase (no hay red).
-    // Cuando vuelva la conexión, se puede registrar en background.
     return { ok: true, offline: true }
   }, [])
 
-  /**
-   * Login.
-   */
   const login = useCallback(async ({ email, password }) => {
     if (!email || !password) {
       return { ok: false, error: 'Correo y contraseña son obligatorios.' }
     }
 
-    // ⭐ NUEVO: si estamos offline, ir directo al login offline.
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       console.log('🟡 Sin conexión: intentando login offline')
       return offlineLogin({ email, password })
@@ -218,24 +205,17 @@ export function AuthProvider({ children }) {
         return { ok: false, error: result.error }
       }
 
-      // ⭐ NUEVO: guardar snapshot para futuros accesos offline.
-      //    Se guarda DESPUÉS de loadProfile exitoso, con el user mapeado.
       try {
         await saveOfflineSnapshot(result.user, password)
       } catch (snapErr) {
         console.warn('⚠️ No se pudo guardar snapshot offline:', snapErr.message)
       }
 
-      // ⭐ NUEVO: registrar sesión
       await startSession(authUser.id)
-
-      // Actualizar last_access en background
       profilesService.touchLastAccess(authUser.id).catch(() => {})
 
       return { ok: true }
     } catch (err) {
-      // ⭐ NUEVO: si el error es de red (no de credenciales),
-      //    intentar login offline con el snapshot guardado.
       const msg = err?.message || ''
       const isNetworkError = /network|fetch|failed to fetch|load failed|networkerror/i.test(msg)
 
@@ -248,27 +228,16 @@ export function AuthProvider({ children }) {
     }
   }, [loadProfile, startSession, offlineLogin])
 
-  /**
-   * Logout.
-   */
-  /**
-   * Logout.
-   */
   const logout = useCallback(async () => {
-    // ⭐ NUEVO: detectar si estamos offline antes de tocar el snapshot
     const online = typeof navigator === 'undefined' ? true : navigator.onLine
 
     try {
-      // ⭐ Cerrar la sesión ANTES de signOut
       await endSession('Logout manual')
       await authService.signOut()
     } catch (err) {
       console.warn('Error al cerrar sesión:', err)
     }
 
-    // ⭐ NUEVO: solo borrar el snapshot si estamos online.
-    //    Si estamos offline, conservamos el snapshot para permitir
-    //    que el usuario vuelva a entrar sin internet.
     if (online) {
       clearOfflineSnapshot()
     } else {
@@ -278,26 +247,17 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [endSession])
 
-  /**
-   * Refrescar perfil manualmente.
-   */
   const refreshUser = useCallback(async () => {
-    // ⭐ NUEVO: sin red no podemos refrescar contra Supabase.
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     const authUser = await authService.getUser()
     if (authUser) await loadProfile(authUser)
   }, [loadProfile])
 
-  /**
-   * Al montar: verificar sesión existente.
-   */
   useEffect(() => {
     let mounted = true
 
     async function init() {
       try {
-        // ⭐ NUEVO: envolvemos getSession en try/catch para que un fallo
-        //    de red no rompa la inicialización. Si falla, caemos al snapshot.
         let session = null
         try {
           session = await authService.getSession()
@@ -310,20 +270,17 @@ export function AuthProvider({ children }) {
         if (session?.user) {
           await loadProfile(session.user)
 
-          // ⭐ Si había una sesión abierta en sessionStorage,
-          //    significa que el usuario recargó. La reusamos.
           let existingSessionId = null
           try { existingSessionId = sessionStorage.getItem(SESSION_KEY) } catch {}
 
           if (existingSessionId) {
             sessionIdRef.current = existingSessionId
+            lastSessionUserIdRef.current = session.user.id
             console.log('♻️ Reusando sesión existente:', existingSessionId)
           } else {
-            // No hay sesión previa (recarga con sesión perdida) → crear nueva
             await startSession(session.user.id)
           }
         } else {
-          // ⭐ NUEVO: sin sesión de Supabase → probar snapshot offline.
           const snap = readOfflineSnapshot()
           if (snap?.user) {
             console.log('🟡 Entrando con snapshot offline de', snap.user.email)
@@ -334,7 +291,6 @@ export function AuthProvider({ children }) {
         }
       } catch (err) {
         console.error('❌ Error inicializando auth:', err)
-        // ⭐ NUEVO: último intento, usar snapshot offline si existe.
         const snap = readOfflineSnapshot()
         if (snap?.user) {
           console.log('🟡 Recuperando sesión offline tras error')
@@ -349,14 +305,12 @@ export function AuthProvider({ children }) {
 
     init()
 
-    // Escuchar cambios de sesión
     const { data: { subscription } } = authService.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return
 
         if (event === 'SIGNED_OUT') {
           setUser(null)
-          // ⭐ Cerrar sesión activa si aún no se cerró
           if (sessionIdRef.current) {
             await endSession('Sesión cerrada desde otro dispositivo')
           }
@@ -372,15 +326,10 @@ export function AuthProvider({ children }) {
     }
   }, [loadProfile, startSession, endSession])
 
-  /**
-   * ⭐ NUEVO: cuando vuelve la red, si teníamos una sesión local
-   *    que no se registró en Supabase (porque entramos offline),
-   *    la registramos ahora. También refrescamos el perfil.
-   */
   useEffect(() => {
-    if (isOffline) return          // aún sin red, no hacer nada
-    if (!user?.id) return          // sin usuario, no hacer nada
-    if (sessionIdRef.current) return // ya hay sesión registrada, no duplicar
+    if (isOffline) return
+    if (!user?.id) return
+    if (sessionIdRef.current) return
 
     let cancelled = false
     ;(async () => {
@@ -389,11 +338,9 @@ export function AuthProvider({ children }) {
         await startSession(user.id, { startedOffline: true })
         if (cancelled) return
 
-        // Refrescar perfil para traer roles/permisos actualizados
         const authUser = await authService.getUser()
         if (authUser) {
           await loadProfile(authUser)
-          // Actualizar last_access también
           profilesService.touchLastAccess(authUser.id).catch(() => {})
         }
       } catch (err) {
@@ -404,30 +351,28 @@ export function AuthProvider({ children }) {
     return () => { cancelled = true }
   }, [isOffline, user?.id, startSession, loadProfile])
 
-  /**
-   * ⭐ Al cerrar/recargar la pestaña, marcar la sesión como cerrada.
-   *    Usamos 'beforeunload' para intentar cerrarla.
-   *    Nota: no es 100% confiable en móviles, pero ayuda.
-   */
+  // ⭐ FIX: beforeunload — throttle para no disparar en cada cambio de foco.
+  //    Solo se ejecuta si la sesión lleva >30s abierta.
   useEffect(() => {
     if (typeof window === 'undefined') return
+    let lastSentAt = 0
+    const MIN_INTERVAL = 30000
 
     const handleBeforeUnload = () => {
       const sessionId = sessionIdRef.current
       if (!sessionId) return
 
-      // Usamos sendBeacon para asegurar que el request salga.
-      // Si no, no se alcanza a hacer.
+      const now = Date.now()
+      if (now - lastSentAt < MIN_INTERVAL) return
+      lastSentAt = now
+
       try {
         const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_sessions?id=eq.${sessionId}`
         const body = JSON.stringify({
           ended_at: new Date().toISOString(),
           end_reason: 'Cierre de navegador',
         })
-        const blob = new Blob([body], { type: 'application/json' })
 
-        // ⚠️ sendBeacon no permite custom headers. Fallback a fetch.
-        //    fetch con keepalive sí permite headers.
         fetch(url, {
           method: 'PATCH',
           headers: {
@@ -446,14 +391,17 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [])
 
-  // Auto-sanación de suscripción push
+  // ⭐ FIX: auto-sanación de push — con guard global + cooldown.
   useEffect(() => {
     if (!user?.id) return
     if (typeof window === 'undefined') return
-    // ⭐ NUEVO: no intentar push si no hay red.
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     if (!('Notification' in window)) return
     if (!('serviceWorker' in navigator)) return
+
+    // ⭐ No re-suscribir si ya lo hicimos hace <5 min.
+    if (pushSubscribeInFlight) return
+    if (Date.now() - pushSubscribeLastAt < PUSH_RESUBSCRIBE_COOLDOWN) return
 
     let alive = true
     ;(async () => {
@@ -461,11 +409,15 @@ export function AuthProvider({ children }) {
         const status = await getPushStatus()
         if (!alive) return
         if (status === 'granted') {
+          pushSubscribeInFlight = true
           console.log('🔄 Push sin suscripción activa, renovando…')
           await subscribeToPush(user.id)
+          pushSubscribeLastAt = Date.now()
         }
       } catch (err) {
         console.warn('⚠️ Error auto-sanando push:', err.message)
+      } finally {
+        pushSubscribeInFlight = false
       }
     })()
 
@@ -477,7 +429,7 @@ export function AuthProvider({ children }) {
       value={{
         user,
         loading,
-        isOffline,          // ⭐ NUEVO: exponer estado de conexión
+        isOffline,
         isAuthenticated: !!user,
         login,
         logout,

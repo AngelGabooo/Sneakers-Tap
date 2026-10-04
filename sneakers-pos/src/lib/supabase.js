@@ -14,25 +14,30 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: 'sneakers-auth',          // ⭐ Storage key único
-    flowType: 'pkce',                     // ⭐ Mejor seguridad para SPA
+    // ⭐ FIX: en producción SPA no necesitamos detectar sesión en URL.
+    //    Esto evita refresh innecesario en cada navegación/recarga.
+    detectSessionInUrl: false,
+    storageKey: 'sneakers-auth',
+    flowType: 'pkce',
   },
   realtime: {
     params: {
       eventsPerSecond: 10,
+      // ⭐ FIX: heartbeat más espaciado (default 30s → 60s)
+      //    Reduce ~50% los logs de Realtime.
+      heartbeatIntervalMs: 60000,
     },
   },
 })
 
 // ⭐ Detectar eventos de auth para debug
+//    (los console.log en producción no afectan al bundle final)
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'TOKEN_REFRESHED') {
     console.log('🔄 Token refrescado')
   }
   if (event === 'SIGNED_OUT') {
     console.log('🚪 Sesión cerrada')
-    // Limpiar storages
     try {
       localStorage.removeItem('sneakers-notifications-cache')
     } catch {}

@@ -12,7 +12,9 @@ import {
 
 const NotificationsContext = createContext(null)
 
-// ⭐ Sonido crítico (mismo helper que en main.jsx)
+// ⭐ FIX: cooldown de sync para no traer todo cada 30s
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000 // 5 minutos
+
 function playCriticalSound() {
   try {
     const audio = new Audio('/sounds/critical.wav')
@@ -29,7 +31,10 @@ export function NotificationsProvider({ children }) {
   const notifiedIdsRef = useRef(new Set())
   const mountedRef = useRef(true)
 
-  // Cargar al montar
+  // ⭐ FIX: trackear última sincronización para evitar re-syncs innecesarios
+  const lastSyncAtRef = useRef(0)
+  const syncInFlightRef = useRef(false)
+
   useEffect(() => {
     mountedRef.current = true
     const cache = notificationsRepo.getLocal()
@@ -39,26 +44,38 @@ export function NotificationsProvider({ children }) {
     return () => { mountedRef.current = false }
   }, [])
 
-  // Sync remoto al montar/reconectar
+  // ⭐ FIX: sync con cooldown
   useEffect(() => {
     if (!isOnline) return
+    if (syncInFlightRef.current) return
+
+    const now = Date.now()
+    if (now - lastSyncAtRef.current < SYNC_COOLDOWN_MS) {
+      console.log('⏭️ Sync notif omitido (cooldown)')
+      return
+    }
+
     let alive = true
     async function sync() {
+      if (syncInFlightRef.current) return
+      syncInFlightRef.current = true
       try {
         const remote = await notificationsRepo.syncFromSupabase()
         if (alive && mountedRef.current) {
           setNotifications(remote)
           remote.forEach((n) => notifiedIdsRef.current.add(n.id))
+          lastSyncAtRef.current = Date.now()
         }
       } catch (err) {
         console.warn('⚠️ Sync notif falló:', err.message)
+      } finally {
+        syncInFlightRef.current = false
       }
     }
     const t = setTimeout(sync, 1500)
     return () => { alive = false; clearTimeout(t) }
   }, [isOnline])
 
-  // ⭐ Web Push + sonido crítico (app en foreground)
   useEffect(() => {
     if (!user) return
     if (browserPermission !== 'granted') return
@@ -69,7 +86,6 @@ export function NotificationsProvider({ children }) {
       notifiedIdsRef.current.add(n.id)
       if (n.actorName === user.name) return
 
-      // ⭐ Sonido crítico (solo si la app está abierta)
       if (n.priority === 'critical') {
         playCriticalSound()
       }
@@ -82,7 +98,6 @@ export function NotificationsProvider({ children }) {
         priority: n.priority === 'critical' ? 'critical' : 'default',
         onClick: () => {
           try { window.focus() } catch {}
-          // ⭐ Deep link al hacer click
           const meta = n.meta || {}
           if (meta.saleId) sessionStorage.setItem('pendingSaleId', meta.saleId)
         },
