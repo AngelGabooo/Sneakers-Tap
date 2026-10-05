@@ -15,6 +15,7 @@ import PosCheckoutModal from '../components/pos/PosCheckoutModal'
 import PosSuccessModal from '../components/pos/PosSuccessModal'
 import PosSuspendModal from '../components/pos/PosSuspendModal'
 import PosTicketModal from '../components/pos/PosTicketModal'
+import PromotionPickerModal from '../components/pos/PromotionPickerModal'   // 🎁 PROMO
 import { useView } from '../context/ViewContext'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
@@ -23,6 +24,7 @@ import { useSales } from '../context/SalesContext'
 import { useCash } from '../context/CashContext'
 import { useSettings } from '../context/SettingsContext'
 import { useCredit } from '../context/CreditContext'
+import { usePromotions } from '../context/PromotionsContext'               // 🎁 PROMO
 import { openCashDrawer, printReceipt } from '../services/printerService'
 import { notifySale } from '../utils/notifyAdmins'
 
@@ -36,12 +38,16 @@ export default function Pos() {
   const { settings } = useSettings()
   const { store, ticket } = settings
 
+  // 🎁 PROMO
+  const { activePromotions } = usePromotions()
+
   const {
     items, customer, totals,
     totalPares,
     volumeDiscount,
     addItem, updateQuantity, removeItem, clear,
     setCustomer,
+    appliedPromotionId, applyPromotion, clearPromotion,   // 🎁 PROMO
   } = useCart()
 
   const openSession = getAnyOpenSession()
@@ -69,6 +75,7 @@ export default function Pos() {
   const [toast, setToast] = useState(null)
 
   const [mobileCartOpen, setMobileCartOpen] = useState(false)
+  const [promotionPickerOpen, setPromotionPickerOpen] = useState(false)   // 🎁 PROMO
 
   useEffect(() => {
     setLoading(true)
@@ -95,7 +102,6 @@ export default function Pos() {
 
   // -------------------------------------------------------------
   // Helper: arma el objeto con TODOS los datos configurables
-  // que el server necesita para imprimir
   // -------------------------------------------------------------
   const buildTicketPayload = (sale) => {
     const storeName = ticket.header.name || store.commercialName || ''
@@ -293,7 +299,6 @@ export default function Pos() {
       }
     }
 
-    // ⭐ Validar método crédito
     if (payment.method === 'credit') {
       if (!activeCredit) {
         setToast({
@@ -365,6 +370,9 @@ export default function Pos() {
           discountAmount: totals.discountAmount,
           wholesaleDiscountAmount: totals.wholesaleDiscountAmount,
           extraDiscount: totals.extraDiscount,
+          promoDiscount: totals.promoDiscount,              // 🎁 PROMO
+          promoId: appliedPromotionId,                      // 🎁 PROMO
+          promoLines: totals.promoLines,                    // 🎁 PROMO
           tax: totals.tax,
           total: totals.total,
         },
@@ -385,7 +393,6 @@ export default function Pos() {
         notes: payment.method === 'credit' ? `Cargo a crédito · ${activeCredit?.id || ''}` : '',
       })
 
-      // ⭐ Si el pago es a crédito, registrar el CARGO (no pago)
       if (payment.method === 'credit' && activeCredit) {
         try {
           await registerCharge({
@@ -417,7 +424,6 @@ export default function Pos() {
       setCheckoutOpen(false)
       setSubmitting(false)
 
-      // 🔔 Notificar a los administradores
       notifySale({
         sale: fullSale,
         actorName: sellerName,
@@ -479,6 +485,7 @@ export default function Pos() {
     setSuccessSale(null)
     setTicketOpen(false)
     clear()
+    clearPromotion()   // 🎁 PROMO
     setSearch('')
     setCategory('all')
     setMobileCartOpen(false)
@@ -548,6 +555,7 @@ export default function Pos() {
                 onOpenCustomer={() => setCustomerOpen(true)}
                 onOpenDiscount={() => setToast({ title: 'Descuento', description: 'Función pendiente.' })}
                 onOpenNote={() => setToast({ title: 'Nota', description: 'Función pendiente.' })}
+                onOpenPromotion={() => setPromotionPickerOpen(true)}   // 🎁 PROMO
                 onOpenSuspend={() => setSuspendOpen(true)}
                 onCheckout={() => setCheckoutOpen(true)}
               />
@@ -582,6 +590,7 @@ export default function Pos() {
               onOpenCustomer={() => setCustomerOpen(true)}
               onOpenDiscount={() => setToast({ title: 'Descuento', description: 'Función pendiente.' })}
               onOpenNote={() => setToast({ title: 'Nota', description: 'Función pendiente.' })}
+              onOpenPromotion={() => { setMobileCartOpen(false); setPromotionPickerOpen(true) }}   // 🎁 PROMO
               onOpenSuspend={() => setSuspendOpen(true)}
               onCheckout={() => { setMobileCartOpen(false); setCheckoutOpen(true) }}
               onClose={() => setMobileCartOpen(false)}
@@ -613,6 +622,23 @@ export default function Pos() {
         onClose={() => setCheckoutOpen(false)}
         onConfirm={handleConfirmSale}
         submitting={submitting}
+      />
+
+      {/* 🎁 PROMO */}
+      <PromotionPickerModal
+        open={promotionPickerOpen}
+        items={items}
+        promotions={activePromotions}
+        customer={customer}
+        currentPromotionId={appliedPromotionId}
+        onClose={() => setPromotionPickerOpen(false)}
+        onApply={(promoId) => {
+          applyPromotion(promoId, activePromotions)
+          setPromotionPickerOpen(false)
+          setToast({
+            title: promoId ? '✅ Promoción aplicada' : 'Promoción removida',
+          })
+        }}
       />
 
       <PosSuccessModal

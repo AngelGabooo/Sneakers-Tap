@@ -15,7 +15,8 @@ import { SyncProvider } from './context/SyncContext.jsx'
 import { UsersProvider } from './context/UsersContext.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { NotificationsProvider } from './context/NotificationsContext.jsx'
-import { CreditProvider } from './context/CreditContext.jsx'   // ⭐ NUEVO
+import { CreditProvider } from './context/CreditContext.jsx'
+import { PromotionsProvider } from './context/PromotionsContext.jsx'   // 🎁 PROMO: NUEVO
 import { ViewProvider } from './context/ViewContext.jsx'
 import { ProductsProvider } from './context/ProductsContext.jsx'
 import { MovementsProvider } from './context/MovementsContext.jsx'
@@ -37,7 +38,6 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     const { view, notifId, saleId, sessionId, productId } = event.data
     console.log('🔔 Click en notificación:', event.data)
 
-    // ⭐ Guardar deep links en sessionStorage para que ViewContext los consuma
     if (saleId) sessionStorage.setItem('pendingSaleId', saleId)
     if (sessionId) sessionStorage.setItem('pendingSessionId', sessionId)
     if (productId) sessionStorage.setItem('pendingProductId', productId)
@@ -47,16 +47,13 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     }
   })
 
-  // ⭐ Escuchar cambios de suscripción
   navigator.serviceWorker.addEventListener('message', async (event) => {
     if (event.data?.type !== 'PUSH_SUBSCRIPTION_CHANGED') return
     console.log('🔄 Suscripción renovada, guardando…')
-    // El handler detallado ya está en `listenForSubscriptionChanges`
-    // que se llama desde AuthContext (si lo tienes)
   })
 }
 
-// ⭐ Leer deep links desde URL (app se abrió por click en notif)
+// ⭐ Leer deep links desde URL
 const params = new URLSearchParams(window.location.search)
 const pendingView = params.get('view')
 const pendingSaleId = params.get('saleId')
@@ -72,15 +69,11 @@ if (pendingView || pendingSaleId || pendingSessionId || pendingProductId) {
   window.history.replaceState({}, '', window.location.pathname)
 }
 
-// ⭐ Sonido custom para notificaciones críticas (app en foreground)
-//    iOS permite Audio() mientras la app esté abierta.
 export function playCriticalSound() {
   try {
     const audio = new Audio('/sounds/critical.wav')
     audio.volume = 0.7
     audio.play().catch((err) => {
-      // Puede fallar si el usuario no ha interactuado con la página aún.
-      // Es normal en iOS. No es crítico.
       console.warn('⚠️ No se pudo reproducir sonido:', err.message)
     })
   } catch (err) {
@@ -88,7 +81,6 @@ export function playCriticalSound() {
   }
 }
 
-// Registrar Service Worker
 registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -99,29 +91,31 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <UsersProvider>
             <AuthProvider>
               <NotificationsProvider>
-                {/* ⭐ NUEVO: CreditProvider justo aquí, dentro de Auth y disponible para toda la app */}
                 <CreditProvider>
-                  <ViewProvider defaultView="dashboard">
-                    <ProductsProvider>
-                      <MovementsProvider>
-                        <CashProvider>
-                          <CartProvider>
-                            <SalesProvider>
-                              <WholesaleProvider>
-                                <RolesProvider>
-                                  <AuditProvider>
-                                    <SettingsProvider>
-                                      <App />
-                                    </SettingsProvider>
-                                  </AuditProvider>
-                                </RolesProvider>
-                              </WholesaleProvider>
-                            </SalesProvider>
-                          </CartProvider>
-                        </CashProvider>
-                      </MovementsProvider>
-                    </ProductsProvider>
-                  </ViewProvider>
+                  {/* 🎁 PROMO: PromotionsProvider envuelve a CartProvider y la app */}
+                  <PromotionsProvider>
+                    <ViewProvider defaultView="dashboard">
+                      <ProductsProvider>
+                        <MovementsProvider>
+                          <CashProvider>
+                            <CartProvider>
+                              <SalesProvider>
+                                <WholesaleProvider>
+                                  <RolesProvider>
+                                    <AuditProvider>
+                                      <SettingsProvider>
+                                        <App />
+                                      </SettingsProvider>
+                                    </AuditProvider>
+                                  </RolesProvider>
+                                </WholesaleProvider>
+                              </SalesProvider>
+                            </CartProvider>
+                          </CashProvider>
+                        </MovementsProvider>
+                      </ProductsProvider>
+                    </ViewProvider>
+                  </PromotionsProvider>
                 </CreditProvider>
               </NotificationsProvider>
             </AuthProvider>

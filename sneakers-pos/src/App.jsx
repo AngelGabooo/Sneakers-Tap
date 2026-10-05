@@ -27,7 +27,8 @@ import CashHistory from './pages/CashHistory'
 import Wholesale from './pages/Wholesale'
 import WholesaleDetail from './pages/WholesaleDetail'
 import WholesaleNew from './pages/WholesaleNew'
-import Credits from './pages/Credits'          // ⭐ NUEVO
+import Credits from './pages/Credits'
+import Promotions from './pages/Promotions'   // 🎁 PROMO
 import Users from './pages/Users'
 import UserCreate from './pages/UserCreate'
 import UserEdit from './pages/UserEdit'
@@ -62,7 +63,8 @@ const VIEWS = {
   wholesale:              Wholesale,
   'wholesale-new':        WholesaleNew,
   'wholesale-edit':       WholesaleDetail,
-  credits:                Credits,              // ⭐ NUEVO
+  credits:                Credits,
+  promotions:             Promotions,          // 🎁 PROMO
   users:                  Users,
   'user-new':             UserCreate,
   'user-edit':            UserEdit,

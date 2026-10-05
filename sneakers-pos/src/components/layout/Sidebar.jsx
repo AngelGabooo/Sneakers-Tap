@@ -4,12 +4,13 @@ import {
   LayoutDashboard, ShoppingCart, Package, Warehouse, ShoppingBag,
   Wallet, Users, UserCog, ShieldCheck, BarChart3, Bell,
   History, Settings, X, Activity, AlertTriangle, SlidersHorizontal,
-  Receipt, HandCoins, Headphones,        // ⭐ NUEVO
+  Receipt, HandCoins, Headphones,
+  Tag,                                     // 🎁 PROMO: NUEVO
 } from 'lucide-react'
 import SneakersLogo from '../login/SneakersLogo'
 import ThemeToggle from '../common/ThemeToggle'
 import { useProducts } from '../../context/ProductsContext'
-import { useCredit } from '../../context/CreditContext'   // ⭐ NUEVO
+import { useCredit } from '../../context/CreditContext'
 import { usePermissions } from '../../hooks/usePermissions'
 
 const NAV_SECTIONS = [
@@ -25,6 +26,8 @@ const NAV_SECTIONS = [
     label: 'Catálogo',
     items: [
       { key: 'products', label: 'Productos', icon: Package, permission: 'products.view' },
+      // 🎁 PROMO: NUEVO
+      { key: 'promotions', label: 'Promociones', icon: Tag, permission: 'products.view' },
     ],
   },
   {
@@ -36,7 +39,7 @@ const NAV_SECTIONS = [
       { key: 'inventory-alerts',    label: 'Alertas de stock',   icon: AlertTriangle,      permission: 'inventory.view', badge: 'alerts' },
     ],
   },
-  
+
   {
     label: 'Caja',
     items: [
@@ -50,7 +53,7 @@ const NAV_SECTIONS = [
     label: 'Operación',
     items: [
       { key: 'wholesale', label: 'Clientes mayoristas', icon: UserCog,    permission: 'wholesale.view' },
-      { key: 'credits',   label: 'Créditos',            icon: HandCoins,  permission: 'credits.view', badge: 'credits' },   // ⭐ NUEVO
+      { key: 'credits',   label: 'Créditos',            icon: HandCoins,  permission: 'credits.view', badge: 'credits' },
     ],
   },
   {
@@ -65,7 +68,6 @@ const NAV_SECTIONS = [
   {
     label: 'Sistema',
     items: [
-
       { key: 'support',  label: 'Soporte técnico', icon: Headphones, permission: 'support.view' },
       { key: 'settings', label: 'Configuración', icon: Settings, permission: 'settings.view' },
     ],
@@ -74,12 +76,9 @@ const NAV_SECTIONS = [
 
 export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpen, onCloseMobile, user }) {
   const { products } = useProducts()
-  const { overdueCount } = useCredit()                       // ⭐ NUEVO
+  const { overdueCount } = useCredit()
   const { can } = usePermissions()
 
-  /**
-   * Cuenta global de alertas de stock (agotados + stock bajo).
-   */
   const alertCount = useMemo(() => {
     let count = 0
     ;(products || []).forEach((p) => {
@@ -100,9 +99,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
     return count
   }, [products])
 
-  /**
-   * Filtra las secciones según permisos del usuario.
-   */
   const visibleSections = useMemo(() => {
     return NAV_SECTIONS
       .map((section) => ({
@@ -119,7 +115,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
 
   return (
     <>
-      {/* Overlay móvil */}
       {mobileOpen && (
         <div
           className="fixed inset-0 bg-black/40 z-40 lg:hidden"
@@ -139,7 +134,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Logo */}
         <div className="h-16 px-5 flex items-center justify-between border-b border-gray-100 dark:border-dark-border">
           <SneakersLogo variant="dark" />
           <button
@@ -151,7 +145,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
           </button>
         </div>
 
-        {/* Navegación */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
           {visibleSections.length === 0 ? (
             <p className="px-3 py-6 text-xs text-gray-500 dark:text-dark-muted text-center">
@@ -167,7 +160,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
                   {section.items.map(({ key, label, icon: Icon, badge }) => {
                     const active = key === activeKey
 
-                    // ⭐ Badge: alertas de stock O créditos vencidos
                     let badgeValue = 0
                     if (badge === 'alerts')   badgeValue = alertCount
                     if (badge === 'credits')  badgeValue = overdueCount
@@ -211,7 +203,6 @@ export default function Sidebar({ activeKey = 'dashboard', onNavigate, mobileOpe
           )}
         </nav>
 
-        {/* Theme toggle + Perfil */}
         <div className="p-3 border-t border-gray-100 dark:border-dark-border space-y-3">
           <div className="flex justify-center">
             <ThemeToggle variant="full" />

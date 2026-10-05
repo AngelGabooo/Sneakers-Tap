@@ -1,5 +1,5 @@
 // src/components/pos/PosCart.jsx
-import { ShoppingCart, UserPlus, Building2, Percent, StickyNote, Trash2, Save, X } from 'lucide-react'
+import { ShoppingCart, UserPlus, Building2, Percent, StickyNote, Trash2, Save, X, Tag } from 'lucide-react'
 import Button from '../common/Button'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
@@ -19,6 +19,7 @@ export default function PosCart({
   onOpenDiscount,
   onOpenNote,
   onOpenSuspend,
+  onOpenPromotion,       // 🎁 PROMO
   onCheckout,
   onClose,
   showCloseButton = false,
@@ -136,6 +137,20 @@ export default function PosCart({
               <Percent size={12} strokeWidth={2.2} />
               Descuento
             </button>
+            {/* 🎁 PROMO */}
+            <button
+              onClick={onOpenPromotion}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium hover:underline ${
+                totals.promoDiscount > 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-brand-blue'
+              }`}
+            >
+              <Tag size={12} strokeWidth={2.2} />
+              {totals.promoDiscount > 0
+                ? `Promo (${-totals.promoDiscount < 0 ? '' : '-'}$${totals.promoDiscount.toLocaleString('es-MX')})`
+                : 'Promoción'}
+            </button>
             <button
               onClick={onOpenNote}
               className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-blue hover:underline"
@@ -167,6 +182,16 @@ export default function PosCart({
               {totals.extraDiscount > 0 && (
                 <Row label="Descuento adicional" value={-totals.extraDiscount} tone="danger" />
               )}
+
+              {/* 🎁 PROMO */}
+              {totals.promoDiscount > 0 && totals.promoLines?.map((line, i) => (
+                <Row
+                  key={i}
+                  label={`🎁 ${line.name}`}
+                  value={-line.amount}
+                  tone="success"
+                />
+              ))}
 
               {totals.tax > 0 && <Row label="Impuestos" value={totals.tax} />}
             </div>
@@ -249,6 +274,7 @@ function Row({ label, value, tone = 'neutral' }) {
     neutral: 'text-brand-black dark:text-dark-text',
     info:    'text-brand-blue',
     danger:  'text-brand-red',
+    success: 'text-emerald-600 dark:text-emerald-400',  // 🎁 PROMO
   }
   return (
     <div className="flex items-center justify-between text-sm">

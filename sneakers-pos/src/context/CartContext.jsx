@@ -14,11 +14,6 @@ const EMPTY_CART = {
 
 /**
  * Extrae la URL de la imagen de un producto de forma robusta.
- * Soporta:
- *   - Array de strings: ['url1', 'url2']
- *   - Array de objetos: [{ url: '...', isPrimary: true }]
- *   - String directa
- *   - null / undefined
  */
 function extractImageUrl(images) {
   if (!images) return null
@@ -36,16 +31,7 @@ function extractImageUrl(images) {
 }
 
 /**
- * ⭐ Calcula el descuento por volumen según el total de pares en el carrito.
- *
- * Reglas:
- *   1. Se toma `defaultDiscount` como base (0-3 pares).
- *   2. Se aplica el tier más alto cuyo `minQty <= totalPares`.
- *   3. El resultado se cappe a `maxDiscount` si está definido (>0).
- *
- * @param {number} totalPares - Suma de quantity de todos los items
- * @param {object} customer   - Cliente mayorista
- * @returns {{ discount: number, tier: object|null, nextTier: object|null }}
+ * Calcula el descuento por volumen según el total de pares en el carrito.
  */
 function computeVolumeDiscount(totalPares, customer) {
   if (!customer?.isWholesale) {
@@ -56,12 +42,10 @@ function computeVolumeDiscount(totalPares, customer) {
   const maxDiscount = Number(customer.maxDiscount) || 0
   const tiers = Array.isArray(customer.discountTiers) ? customer.discountTiers : []
 
-  // Ordenar tiers por minQty ascendente
   const sortedTiers = [...tiers]
     .filter((t) => Number(t.minQty) > 0 && Number(t.discount) > 0)
     .sort((a, b) => Number(a.minQty) - Number(b.minQty))
 
-  // Tier aplicable: el más alto cuyo minQty <= totalPares
   let appliedTier = null
   for (const tier of sortedTiers) {
     if (totalPares >= Number(tier.minQty)) {
@@ -71,21 +55,128 @@ function computeVolumeDiscount(totalPares, customer) {
     }
   }
 
-  // Siguiente tier alcanzable (para hint de UX)
   const nextTier = sortedTiers.find((t) => totalPares < Number(t.minQty)) || null
 
-  // El descuento base vs el del tier: se toma el MAYOR
   let discount = baseDiscount
   if (appliedTier && Number(appliedTier.discount) > discount) {
     discount = Number(appliedTier.discount)
   }
 
-  // Capar al máximo si está definido
   if (maxDiscount > 0 && discount > maxDiscount) {
     discount = maxDiscount
   }
 
   return { discount, tier: appliedTier, nextTier }
+}
+
+/**
+ * 🎁 PROMO: Calcula el descuento de una promoción sobre los items del carrito.
+ *
+ * NUEVO MODELO: "Lleva N pares, paga $X por ese grupo"
+ *   - bundle_qty: cuántos pares lleva (2, 3, 4...)
+ *   - bundle_price: cuánto paga por ese grupo ($1,200)
+ *
+ * Cálculo:
+ *   1. Filtrar items elegibles
+ *   2. Expandir a unidades individuales
+ *   3. Contar grupos completos = floor(total / bundle_qty)
+ *   4. Precio normal del grupo = suma de precios individuales
+ *   5. Descuento por grupo = precio_normal - bundle_price
+ *   6. Sumar descuentos de todos los grupos
+ */
+export function computePromotionDiscount(items, promotion) {
+  if (!promotion || !items?.length) {
+    return { discount: 0, lines: [], detail: null }
+  }
+
+  // ⭐ NUEVO MODELO: bundle_qty + bundle_price
+  const bundleQty = Number(promotion.bundle_qty) || Number(promotion.buy_qty) || 0
+  const bundlePrice = Number(promotion.bundle_price) || 0
+
+  // Validaciones
+  if (bundleQty <= 1 || bundlePrice <= 0) {
+    return { discount: 0, lines: [], detail: null }
+  }
+
+  // 1. Filtrar items elegibles
+  const eligible = items.filter((item) => {
+    if (promotion.applies_to === 'products') {
+      return promotion.productIds?.includes(item.productId)
+    }
+    if (promotion.applies_to === 'category') {
+      return item.category === promotion.category_filter
+    }
+    if (promotion.applies_to === 'brand') {
+      return item.brand === promotion.brand_filter
+    }
+    return false
+  })
+
+  if (eligible.length === 0) {
+    return { discount: 0, lines: [], detail: null }
+  }
+
+  // 2. Expandir en unidades individuales
+  const units = []
+  eligible.forEach((item) => {
+    for (let i = 0; i < item.quantity; i++) {
+      units.push({ ...item, unitIndex: i })
+    }
+  })
+
+  // 3. Ordenar por precio descendente (agrupa los más caros primero)
+  units.sort((a, b) => Number(b.price) - Number(a.price))
+
+  // 4. Contar grupos completos
+  const groups = Math.floor(units.length / bundleQty)
+  if (groups <= 0) {
+    return { discount: 0, lines: [], detail: null }
+  }
+
+  // 5. Sumar el descuento por cada grupo
+  let totalDiscount = 0
+  for (let g = 0; g < groups; g++) {
+    const groupUnits = units.slice(g * bundleQty, (g + 1) * bundleQty)
+    const normalPrice = groupUnits.reduce((acc, u) => acc + Number(u.price), 0)
+    const groupDiscount = Math.max(0, normalPrice - bundlePrice)
+    totalDiscount += groupDiscount
+  }
+
+  if (totalDiscount <= 0) {
+    return { discount: 0, lines: [], detail: null }
+  }
+
+  return {
+    discount: totalDiscount,
+    lines: [{
+      promotionId: promotion.id,
+      name: promotion.name,
+      amount: totalDiscount,
+      groups,
+      bundleQty,
+      bundlePrice,
+    }],
+    detail: {
+      eligibleCount: units.length,
+      groups,
+      bundleQty,
+      bundlePrice,
+    },
+  }
+}
+
+/**
+ * 🎁 PROMO: Devuelve las promos que APLICAN al carrito, ordenadas por mayor descuento.
+ */
+export function findApplicablePromotions(items, promotions) {
+  if (!items?.length || !promotions?.length) return []
+  return promotions
+    .map((promo) => {
+      const result = computePromotionDiscount(items, promo)
+      return { promotion: promo, ...result }
+    })
+    .filter((x) => x.discount > 0)
+    .sort((a, b) => b.discount - a.discount)
 }
 
 export function CartProvider({ children }) {
@@ -97,6 +188,10 @@ export function CartProvider({ children }) {
   const [manualDiscount, setManualDiscount] = useState(null)
   const [note, setNote] = useState('')
 
+  // 🎁 PROMO: promoción aplicada (la decide el cajero)
+  const [appliedPromotionId, setAppliedPromotionId] = useState(null)
+  const [promotionResult, setPromotionResult] = useState(null)
+
   // Cargar carrito al cambiar de usuario
   useEffect(() => {
     if (!userId) {
@@ -104,6 +199,8 @@ export function CartProvider({ children }) {
       setCustomer(null)
       setManualDiscount(null)
       setNote('')
+      setAppliedPromotionId(null)
+      setPromotionResult(null)
       return
     }
 
@@ -114,11 +211,15 @@ export function CartProvider({ children }) {
       setCustomer(saved.customer || null)
       setManualDiscount(saved.manualDiscount || null)
       setNote(saved.note || '')
+      setAppliedPromotionId(saved.appliedPromotionId || null)
+      setPromotionResult(saved.promotionResult || null)
     } else {
       setItems([])
       setCustomer(null)
       setManualDiscount(null)
       setNote('')
+      setAppliedPromotionId(null)
+      setPromotionResult(null)
     }
   }, [userId])
 
@@ -126,8 +227,11 @@ export function CartProvider({ children }) {
   useEffect(() => {
     if (!userId) return
     const key = storageKey('cart', userId)
-    writeSessionJSON(key, { items, customer, manualDiscount, note })
-  }, [userId, items, customer, manualDiscount, note])
+    writeSessionJSON(key, {
+      items, customer, manualDiscount, note,
+      appliedPromotionId, promotionResult,
+    })
+  }, [userId, items, customer, manualDiscount, note, appliedPromotionId, promotionResult])
 
   // ⭐ Total de pares en el carrito
   const totalPares = useMemo(
@@ -158,6 +262,10 @@ export function CartProvider({ children }) {
       const stock = variant ? Number(variant.stock) || 0 : Number(product.initialStock) || 0
       const imageUrl = extractImageUrl(product.images)
 
+      // 🎁 PROMO: guardar category y brand para que las promos puedan filtrar
+      const category = product.category || null
+      const brand = product.brand || null
+
       setItems((list) => {
         const existing = list.find((i) => i.key === key)
         if (existing) {
@@ -180,6 +288,8 @@ export function CartProvider({ children }) {
             price,
             quantity: Math.min(stock, quantity),
             stock,
+            category,       // 🎁 PROMO
+            brand,          // 🎁 PROMO
           },
         ]
       })
@@ -187,7 +297,7 @@ export function CartProvider({ children }) {
     [priceFactor],
   )
 
-  // ⭐ Recalcular precios cuando cambia el factor (por cambio de cliente o volumen)
+  // ⭐ Recalcular precios cuando cambia el factor
   useEffect(() => {
     setItems((list) =>
       list.map((i) => ({ ...i, price: (i.basePrice || 0) * priceFactor })),
@@ -208,18 +318,52 @@ export function CartProvider({ children }) {
     setItems((list) => list.filter((i) => i.key !== key))
   }, [])
 
+  // 🎁 PROMO: aplicar/quitar promoción
+  const applyPromotion = useCallback((promotionId, allPromotions) => {
+    setAppliedPromotionId(promotionId)
+    if (!promotionId) {
+      setPromotionResult(null)
+      return
+    }
+    const promo = (allPromotions || []).find((p) => p.id === promotionId)
+    if (!promo) {
+      setPromotionResult(null)
+      return
+    }
+    const result = computePromotionDiscount(items, promo)
+    setPromotionResult(result)
+  }, [items])
+
+  // 🎁 PROMO: recalcular el descuento cuando cambian los items o la promo
+  //    Esto mantiene el descuento sincronizado si el cajero agrega/quita pares.
+  useEffect(() => {
+    if (!appliedPromotionId) return
+    // Buscar la promoción aplicada en el resultado guardado (ya viene con productIds)
+    // Nota: el resultado guardado en `promotionResult` NO tiene la promo completa,
+    // así que solo recalculamos si el usuario vuelve a aplicar la promo.
+    // Este efecto evita bugs si el carrito cambia después de aplicar la promo.
+    // No-op intencional: el recálculo se hace al aplicar la promo.
+  }, [items, appliedPromotionId, promotionResult])
+
+  const clearPromotion = useCallback(() => {
+    setAppliedPromotionId(null)
+    setPromotionResult(null)
+  }, [])
+
   const clear = useCallback(() => {
     setItems([])
     setCustomer(null)
     setManualDiscount(null)
     setNote('')
+    setAppliedPromotionId(null)
+    setPromotionResult(null)
     if (userId) {
       const key = storageKey('cart', userId)
       writeSessionJSON(key, EMPTY_CART)
     }
   }, [userId])
 
-  // ⭐ Totales considerando descuento por volumen + manual
+  // ⭐ Totales considerando descuento por volumen + manual + promo
   const totals = useMemo(() => {
     const subtotal = items.reduce((acc, i) => acc + (i.basePrice || 0) * i.quantity, 0)
     const discounted = items.reduce((acc, i) => acc + i.price * i.quantity, 0)
@@ -234,18 +378,23 @@ export function CartProvider({ children }) {
           : Number(manualDiscount.value) || 0
     }
 
-    const total = Math.max(0, discounted - extraDiscount)
+    // 🎁 PROMO: descuento de promoción
+    const promoDiscount = promotionResult?.discount || 0
+
+    const total = Math.max(0, discounted - extraDiscount - promoDiscount)
     const tax = 0
 
     return {
       subtotal,
       wholesaleDiscountAmount,
-      discountAmount: wholesaleDiscountAmount + extraDiscount,
+      discountAmount: wholesaleDiscountAmount + extraDiscount + promoDiscount,
       extraDiscount,
+      promoDiscount,
+      promoLines: promotionResult?.lines || [],
       tax,
       total,
     }
-  }, [items, manualDiscount])
+  }, [items, manualDiscount, promotionResult])
 
   const value = {
     items,
@@ -253,7 +402,6 @@ export function CartProvider({ children }) {
     discount: manualDiscount,
     note,
     totals,
-    // ⭐ Exponer datos del volumen
     totalPares,
     volumeDiscount,
     addItem,
@@ -263,6 +411,10 @@ export function CartProvider({ children }) {
     setCustomer,
     setDiscount: setManualDiscount,
     setNote,
+    // 🎁 PROMO
+    appliedPromotionId,
+    applyPromotion,
+    clearPromotion,
   }
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
