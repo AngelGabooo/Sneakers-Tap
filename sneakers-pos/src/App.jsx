@@ -4,6 +4,7 @@ import { useView } from './context/ViewContext'
 import { usePermissions } from './hooks/usePermissions'
 import { FALLBACK_VIEW_ORDER } from './data/viewPermissions'
 import OfflineBanner from './components/common/OfflineBanner'
+import OpenDrawerButton from './components/common/OpenDrawerButton'   // 👈 NUEVO
 
 import Login from './pages/Login'
 import NoAccess from './pages/NoAccess'
@@ -113,6 +114,7 @@ export default function App() {
         <>
           <OfflineBanner />
           <FallbackView />
+          <OpenDrawerButton />   {/* 👈 NUEVO */}
         </>
       )
     }
@@ -120,6 +122,7 @@ export default function App() {
       <>
         <OfflineBanner />
         <NoAccess />
+        <OpenDrawerButton />   {/* 👈 NUEVO */}
       </>
     )
   }
@@ -129,6 +132,7 @@ export default function App() {
       <>
         <OfflineBanner />
         <NoAccess />
+        <OpenDrawerButton />   {/* 👈 NUEVO */}
       </>
     )
   }
@@ -138,6 +142,7 @@ export default function App() {
     <>
       <OfflineBanner />
       <CurrentView />
+      <OpenDrawerButton />   {/* 👈 NUEVO */}
     </>
   )
 }
