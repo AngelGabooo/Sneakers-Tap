@@ -26,6 +26,7 @@ import { useProducts } from '../context/ProductsContext'
 import { useAuth } from '../context/AuthContext'
 import { storageService } from '../services/storageService'
 import { generateSku, generateBarcode } from '../utils/codeGenerator'
+import { normalizeImages } from '../utils/storageHelpers'   // ⭐ NUEVO
 
 function migrateToVariantsBySize(product) {
   if (!product) return {}
@@ -306,13 +307,36 @@ export default function ProductEdit() {
     setUploading(true)
 
     try {
-      // 1. Subir imágenes pendientes
+      // ─────────────────────────────────────────────────────────────
+      // 1. Normalizar imágenes originales (para tener su path garantizado)
+      //    Esto NO toca la BD, solo es una copia de trabajo en memoria.
+      //    Si la imagen ya tenía path, se respeta.
+      //    Si no, se reconstruye desde la URL (compatibilidad con datos viejos).
+      // ─────────────────────────────────────────────────────────────
+      const originalNormalized = normalizeImages(product?.images || [])
+      const originalPaths = originalNormalized
+        .map((img) => img.path)
+        .filter(Boolean)
+
+      // ─────────────────────────────────────────────────────────────
+      // 2. Subir imágenes nuevas (uploadMany respeta las que ya tienen url)
+      //    ⚠️ AQUÍ AÚN NO BORRAMOS NADA del storage.
+      // ─────────────────────────────────────────────────────────────
       let finalImages = []
       if (images.length > 0) {
         finalImages = await storageService.uploadMany(images, 'products')
       }
 
-      // 2. Preparar variantes (preservando stock + UUID real de BD)
+      // ─────────────────────────────────────────────────────────────
+      // 3. Comparar rutas para saber cuáles imágenes fueron eliminadas
+      //    por el usuario (estaban en la BD pero ya no están en la lista final)
+      // ─────────────────────────────────────────────────────────────
+      const finalPaths = finalImages.map((img) => img.path).filter(Boolean)
+      const pathsToDelete = originalPaths.filter((p) => !finalPaths.includes(p))
+
+      // ─────────────────────────────────────────────────────────────
+      // 4. Preparar variantes (igual que antes)
+      // ─────────────────────────────────────────────────────────────
       const safeVariants = variants.map((v) => {
         const variantSku = v.sku || buildVariantSku(form.sku, v.size, v.color)
         const variantBarcode = v.barcode || buildVariantBarcode(variantSku)
@@ -329,6 +353,9 @@ export default function ProductEdit() {
       const sizesList = Object.keys(variantsBySize)
       const colorsList = Array.from(new Set(Object.values(variantsBySize).flat()))
 
+      // ─────────────────────────────────────────────────────────────
+      // 5. Payload final — ahora images YA incluye { url, path, isPrimary }
+      // ─────────────────────────────────────────────────────────────
       const payload = {
         ...form,
         sizes: sizesList,
@@ -336,18 +363,44 @@ export default function ProductEdit() {
         variants: safeVariants,
         variantsBySize,
         codeType,
-        images: finalImages,
+        images: finalImages,   // ⭐ cada item: { url, path, isPrimary }
         updatedBy: user?.name || 'Sistema',
       }
 
+      // ─────────────────────────────────────────────────────────────
+      // 6. Guardar en la BD PRIMERO. Si esto falla, NO borramos nada.
+      // ─────────────────────────────────────────────────────────────
       await updateProduct(productId, payload)
+
+      // ─────────────────────────────────────────────────────────────
+      // 7. SOLO SI la BD se actualizó con éxito, limpiamos Storage.
+      //    Si falla el borrado, NO rompemos el guardado (solo warning).
+      // ─────────────────────────────────────────────────────────────
+      if (pathsToDelete.length > 0) {
+        try {
+          await storageService.removeMany(pathsToDelete)
+          console.log(`🗑️ ${pathsToDelete.length} imagen(es) eliminada(s) del storage`)
+        } catch (err) {
+          console.warn('⚠️ No se pudieron eliminar imágenes del storage:', err)
+          // No lanzamos el error: el guardado ya fue exitoso.
+        }
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // 8. Actualizar el estado local con las imágenes definitivas
+      //    (para que si el usuario sigue editando, no intente borrar
+      //    imágenes que ya no existen en Storage).
+      // ─────────────────────────────────────────────────────────────
+      setImages(finalImages)
 
       setSubmitting(false)
       setUploading(false)
       setDirty(false)
       setToast({
         title: 'Producto actualizado correctamente',
-        description: `Los cambios de ${form.name} se guardaron.`,
+        description: pathsToDelete.length > 0
+          ? `Se guardaron los cambios y se eliminaron ${pathsToDelete.length} imagen(es) antiguas.`
+          : `Los cambios de ${form.name} se guardaron.`,
       })
     } catch (err) {
       console.error('❌ Error actualizando producto:', err)

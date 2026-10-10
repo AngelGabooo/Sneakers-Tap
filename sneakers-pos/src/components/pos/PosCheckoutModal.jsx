@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   X, Banknote, CreditCard, ArrowRightLeft, Smartphone, MoreHorizontal,
-  CheckCircle2, HandCoins, AlertTriangle,
+  CheckCircle2, HandCoins, AlertTriangle, Wallet,
 } from 'lucide-react'
 import Button from '../common/Button'
 
@@ -10,11 +10,12 @@ const METHODS = [
   { key: 'cash',     label: 'Efectivo',      icon: Banknote },
   { key: 'card',     label: 'Tarjeta',       icon: CreditCard },
   { key: 'transfer', label: 'Transferencia', icon: ArrowRightLeft },
+  { key: 'mixed',    label: 'Mixto (Efec+Transf)', icon: Wallet }, // ⭐ NUEVO
   { key: 'digital',  label: 'Pago digital',  icon: Smartphone },
   { key: 'other',    label: 'Otro',          icon: MoreHorizontal },
 ]
 
-const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX')}`
+const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 })}`
 
 export default function PosCheckoutModal({
   open,
@@ -22,12 +23,12 @@ export default function PosCheckoutModal({
   onClose,
   onConfirm,
   submitting,
-  // ⭐ NUEVO: cliente + su crédito activo
   customer,
   activeCredit,
 }) {
   const [method, setMethod] = useState('cash')
   const [cashReceived, setCashReceived] = useState('')
+  const [mixedCash, setMixedCash] = useState('') // ⭐ Efectivo en pago mixto
   const [cardType, setCardType] = useState('debit')
   const [reference, setReference] = useState('')
 
@@ -35,6 +36,7 @@ export default function PosCheckoutModal({
     if (open) {
       setMethod('cash')
       setCashReceived('')
+      setMixedCash('')
       setCardType('debit')
       setReference('')
     }
@@ -51,6 +53,10 @@ export default function PosCheckoutModal({
   const received = Number(cashReceived) || 0
   const change = Math.max(0, received - total)
 
+  // ⭐ Cálculos para pago mixto
+  const mixedCashNum = Number(mixedCash) || 0
+  const mixedTransferNum = Math.max(0, total - mixedCashNum)
+
   // ⭐ ¿Este cliente puede usar crédito?
   const canUseCredit =
     customer?.isWholesale &&
@@ -65,7 +71,6 @@ export default function PosCheckoutModal({
   const availableMethods = useMemo(() => {
     const list = [...METHODS]
     if (canUseCredit) {
-      // Insertar "Crédito" al inicio si está disponible
       list.unshift({
         key: 'credit',
         label: 'Crédito',
@@ -78,20 +83,35 @@ export default function PosCheckoutModal({
   const canConfirm = useMemo(() => {
     if (method === 'credit') return creditCoversSale
     if (method === 'cash') return received >= total
+    if (method === 'mixed') return mixedCashNum >= 0 && mixedCashNum <= total // Se permite 0 efectivo (todo transferencia)
     return true
-  }, [method, received, total, creditCoversSale])
+  }, [method, received, total, creditCoversSale, mixedCashNum])
 
   if (!open) return null
 
   const handleConfirm = () => {
     if (!canConfirm) return
+
+    // ⭐ Lógica especial para Pago Mixto
+    if (method === 'mixed') {
+      onConfirm?.({
+        method: 'mixed',
+        cashReceived: mixedCashNum, // Lo que entra a caja
+        transferReceived: mixedTransferNum, // Lo que va por transferencia
+        change: 0, // No hay cambio en mixto
+        cardType: null,
+        reference: reference || null,
+        creditId: null,
+      })
+      return
+    }
+
     onConfirm?.({
       method,
       cashReceived: method === 'cash' ? received : null,
       change: method === 'cash' ? change : 0,
       cardType: method === 'card' ? cardType : null,
       reference: reference || null,
-      // ⭐ Si es crédito, incluir el creditId
       creditId: method === 'credit' ? activeCredit.id : null,
     })
   }
@@ -126,11 +146,7 @@ export default function PosCheckoutModal({
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {/* Info del crédito activo */}
           {canUseCredit && (
-            <div className="
-              flex items-start gap-3 p-3 rounded-lg
-              bg-emerald-50 dark:bg-emerald-950/30
-              border border-emerald-200 dark:border-emerald-900/50
-            ">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
               <HandCoins size={16} className="text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
@@ -146,13 +162,8 @@ export default function PosCheckoutModal({
             </div>
           )}
 
-          {/* ⚠️ Cliente con crédito activo pero saldo insuficiente */}
           {canUseCredit && !creditCoversSale && (
-            <div className="
-              flex items-start gap-3 p-3 rounded-lg
-              bg-amber-50 dark:bg-amber-950/30
-              border border-amber-200 dark:border-amber-900/50
-            ">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
               <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
               <p className="text-[11px] text-amber-800 dark:text-amber-300">
                 El saldo del crédito ({fmt(creditBalance)}) es menor al total de la venta. No se puede cobrar completo con crédito.
@@ -186,7 +197,7 @@ export default function PosCheckoutModal({
                     `}
                   >
                     <Icon size={18} strokeWidth={2} />
-                    <span className="text-xs font-medium">{label}</span>
+                    <span className="text-[11px] font-medium text-center leading-tight">{label}</span>
                   </button>
                 )
               })}
@@ -205,13 +216,7 @@ export default function PosCheckoutModal({
                   value={cashReceived}
                   onChange={(e) => setCashReceived(e.target.value)}
                   placeholder="0.00"
-                  className="
-                    w-full h-12 px-3 rounded-lg text-lg font-semibold text-center
-                    bg-white dark:bg-dark-card text-brand-black dark:text-dark-text
-                    border border-gray-200 dark:border-dark-border
-                    focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40
-                    outline-none
-                  "
+                  className="w-full h-12 px-3 rounded-lg text-lg font-semibold text-center bg-white dark:bg-dark-card text-brand-black dark:text-dark-text border border-gray-200 dark:border-dark-border focus:border-brand-blue focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 outline-none"
                 />
               </div>
 
@@ -233,8 +238,7 @@ export default function PosCheckoutModal({
               {received > 0 && (
                 <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-3">
                   <p className="text-xs text-emerald-800 dark:text-emerald-300">
-                    Cambio:{' '}
-                    <span className="text-lg font-bold">{fmt(change)}</span>
+                    Cambio: <span className="text-lg font-bold">{fmt(change)}</span>
                   </p>
                 </div>
               )}
@@ -247,21 +251,64 @@ export default function PosCheckoutModal({
             </>
           )}
 
+          {/* ⭐ PAGO MIXTO (Efectivo + Transferencia) */}
+          {method === 'mixed' && (
+            <div className="space-y-4 p-4 rounded-lg bg-gray-50 dark:bg-dark-surface border border-gray-200 dark:border-dark-border">
+              <p className="text-sm font-semibold text-brand-black dark:text-dark-text">
+                Desglose del pago
+              </p>
+              
+              <div>
+                <label className="block text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">
+                  Monto en Efectivo
+                </label>
+                <input
+                  type="number"
+                  value={mixedCash}
+                  onChange={(e) => setMixedCash(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full h-12 px-3 rounded-lg text-lg font-semibold text-center bg-white dark:bg-dark-card text-brand-black dark:text-dark-text border border-gray-200 dark:border-dark-border focus:border-brand-blue outline-none"
+                />
+                {mixedCashNum > total && (
+                  <p className="text-xs text-brand-red mt-1">El efectivo no puede ser mayor al total.</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40">
+                <div>
+                  <p className="text-xs text-brand-blue dark:text-blue-300 font-semibold">Resto por Transferencia</p>
+                  <p className="text-[11px] text-gray-500 dark:text-dark-muted">Calculado automáticamente</p>
+                </div>
+                <p className="text-xl font-bold text-brand-blueDark dark:text-blue-200">
+                  {fmt(mixedTransferNum)}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">
+                  Referencia de transferencia <span className="text-gray-400 font-normal">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder="Ej. REF-12345"
+                  className="w-full h-11 px-3 rounded-lg text-sm bg-white dark:bg-dark-card text-brand-black dark:text-dark-text border border-gray-200 dark:border-dark-border focus:border-brand-blue outline-none"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Crédito */}
           {method === 'credit' && (
-            <div className="
-              p-4 rounded-lg bg-blue-50/60 dark:bg-blue-950/20
-              border border-blue-200 dark:border-blue-900/40
-            ">
+            <div className="p-4 rounded-lg bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
               <p className="text-sm font-semibold text-brand-black dark:text-dark-text mb-2">
                 Detalles del cargo a crédito
               </p>
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-gray-600 dark:text-dark-muted">Saldo actual:</span>
-                  <span className="font-semibold text-brand-black dark:text-dark-text">
-                    {fmt(creditBalance)}
-                  </span>
+                  <span className="font-semibold text-brand-black dark:text-dark-text">{fmt(creditBalance)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600 dark:text-dark-muted">Esta venta:</span>
@@ -269,9 +316,7 @@ export default function PosCheckoutModal({
                 </div>
                 <div className="flex justify-between pt-1.5 border-t border-blue-200 dark:border-blue-900/40">
                   <span className="font-semibold text-brand-black dark:text-dark-text">Nuevo saldo:</span>
-                  <span className="font-bold text-brand-blueDark dark:text-blue-200">
-                    {fmt(creditBalance - total)}
-                  </span>
+                  <span className="font-bold text-brand-blueDark dark:text-blue-200">{fmt(creditBalance - total)}</span>
                 </div>
               </div>
             </div>
@@ -281,9 +326,7 @@ export default function PosCheckoutModal({
           {method === 'card' && (
             <>
               <div>
-                <p className="text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">
-                  Tipo
-                </p>
+                <p className="text-sm font-medium text-brand-black dark:text-dark-text mb-1.5">Tipo</p>
                 <div className="flex gap-2">
                   {['debit', 'credit'].map((t) => (
                     <button

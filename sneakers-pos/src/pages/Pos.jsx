@@ -275,6 +275,7 @@ export default function Pos() {
       return
     }
 
+    // Validaciones de Mayorista (sin cambios)
     if (customer?.isWholesale) {
       const minAmount = Number(customer.minPurchaseAmount) || 0
       const minUnits = Number(customer.minPurchaseUnits) || 0
@@ -299,6 +300,7 @@ export default function Pos() {
       }
     }
 
+    // Validación de Crédito (sin cambios)
     if (payment.method === 'credit') {
       if (!activeCredit) {
         setToast({
@@ -319,14 +321,14 @@ export default function Pos() {
 
     setSubmitting(true)
 
-    const methodLabel =
-      payment.method === 'cash' ? 'Efectivo'
-      : payment.method === 'card'
-        ? `Tarjeta (${payment.cardType === 'credit' ? 'Crédito' : 'Débito'})`
-      : payment.method === 'transfer' ? 'Transferencia'
-      : payment.method === 'digital' ? 'Pago digital'
-      : payment.method === 'credit' ? 'Crédito'
-      : 'Otro'
+    // ⭐ NUEVA LÓGICA DE ETIQUETAS PARA PAGO MIXTO
+    let methodLabel = 'Otro'
+    if (payment.method === 'cash') methodLabel = 'Efectivo'
+    else if (payment.method === 'card') methodLabel = `Tarjeta (${payment.cardType === 'credit' ? 'Crédito' : 'Débito'})`
+    else if (payment.method === 'transfer') methodLabel = 'Transferencia'
+    else if (payment.method === 'digital') methodLabel = 'Pago digital'
+    else if (payment.method === 'credit') methodLabel = 'Crédito'
+    else if (payment.method === 'mixed') methodLabel = 'Mixto (Efectivo + Transferencia)' // ⭐
 
     const wholesaleSnapshot = customer?.isWholesale
       ? {
@@ -370,16 +372,18 @@ export default function Pos() {
           discountAmount: totals.discountAmount,
           wholesaleDiscountAmount: totals.wholesaleDiscountAmount,
           extraDiscount: totals.extraDiscount,
-          promoDiscount: totals.promoDiscount,              // 🎁 PROMO
-          promoId: appliedPromotionId,                      // 🎁 PROMO
-          promoLines: totals.promoLines,                    // 🎁 PROMO
+          promoDiscount: totals.promoDiscount,
+          promoId: appliedPromotionId,
+          promoLines: totals.promoLines,
           tax: totals.tax,
           total: totals.total,
         },
+        // ⭐ GUARDAMOS EL DESGLOSE DEL PAGO MIXTO
         payment: {
           method: payment.method,
           methodLabel,
-          cashReceived: payment.cashReceived || null,
+          cashReceived: payment.cashReceived || null,       // Efectivo (puro o parte del mixto)
+          transferReceived: payment.transferReceived || null, // ⭐ Parte transferida en mixto
           cardType: payment.cardType || null,
           reference: payment.reference || null,
           change: payment.change || 0,
@@ -432,7 +436,12 @@ export default function Pos() {
         branch: cashBranch,
       })
 
-      if (payment.method === 'cash') {
+      // ⭐ LÓGICA CLAVE: Abrir cajón SOLO si hay efectivo involucrado
+      const hasCash = 
+        payment.method === 'cash' || 
+        (payment.method === 'mixed' && Number(payment.cashReceived) > 0)
+
+      if (hasCash) {
         const result = await openCashDrawer()
         if (!result.ok) {
           console.warn('⚠️ No se pudo abrir el cajón:', result.error)

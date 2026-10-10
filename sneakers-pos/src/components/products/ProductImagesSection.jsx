@@ -8,18 +8,28 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
   const inputRef = useRef(null)
 
   const handleFiles = (files) => {
-    const list = Array.from(files).map((file) => ({
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      file,                                        // ← archivo pendiente de subir
-      url: URL.createObjectURL(file),              // ← preview local
-      isPrimary: images.length === 0 && list_lenght_check(images),
-    }))
-    onChange?.([...images, ...list])
-  }
+    if (!files || files.length === 0) return
 
-  // Helper para determinar si es la primera imagen
-  function list_lenght_check(currentImages) {
-    return currentImages.length === 0
+    const newItems = Array.from(files).map((file) => ({
+      id: `new-${file.name}-${Date.now()}-${Math.random()}`,
+      file,                           // ← archivo pendiente de subir
+      url: URL.createObjectURL(file), // ← preview local
+      isPrimary: false,               // se asigna abajo
+    }))
+
+    // Si no había imágenes previas, la primera nueva será la principal
+    let combined = [...images, ...newItems]
+    
+    // Si ninguna imagen tiene isPrimary, marcar la primera como principal
+    const hasPrimary = combined.some((img) => img.isPrimary)
+    if (!hasPrimary && combined.length > 0) {
+      combined = combined.map((img, idx) => ({
+        ...img,
+        isPrimary: idx === 0,
+      }))
+    }
+
+    onChange?.(combined)
   }
 
   const handleDrop = (e) => {
@@ -30,12 +40,23 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
 
   const handleRemove = (id) => {
     if (uploading) return
-    onChange?.(images.filter((img) => img.id !== id))
+    const filtered = images.filter((img) => (img.id || img.url) !== id)
+    
+    // Si eliminamos la imagen principal, reasignar a la primera disponible
+    const stillHasPrimary = filtered.some((img) => img.isPrimary)
+    const final = !stillHasPrimary && filtered.length > 0
+      ? filtered.map((img, idx) => ({ ...img, isPrimary: idx === 0 }))
+      : filtered
+
+    onChange?.(final)
   }
 
   const handleSetPrimary = (id) => {
     if (uploading) return
-    onChange?.(images.map((img) => ({ ...img, isPrimary: img.id === id })))
+    onChange?.(images.map((img) => ({ 
+      ...img, 
+      isPrimary: (img.id || img.url) === id 
+    })))
   }
 
   return (
@@ -92,7 +113,10 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
           multiple
           className="hidden"
           disabled={uploading}
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            handleFiles(e.target.files)
+            e.target.value = '' // ← permite volver a subir el mismo archivo
+          }}
         />
       </div>
 
@@ -101,9 +125,10 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 mt-5">
           {images.map((img) => {
             const isPending = !!img.file
+            const key = img.id || img.url
             return (
               <div
-                key={img.id || img.url}
+                key={key}
                 className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-surface"
               >
                 <img src={img.url} alt="" className="w-full h-full object-cover" />
@@ -127,7 +152,7 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
                   {!img.isPrimary && (
                     <button
                       type="button"
-                      onClick={() => handleSetPrimary(img.id || img.url)}
+                      onClick={() => handleSetPrimary(key)}
                       disabled={uploading}
                       className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-black transition-colors disabled:opacity-50"
                       title="Marcar como principal"
@@ -137,7 +162,7 @@ export default function ProductImagesSection({ images = [], onChange, uploading 
                   )}
                   <button
                     type="button"
-                    onClick={() => handleRemove(img.id || img.url)}
+                    onClick={() => handleRemove(key)}
                     disabled={uploading}
                     className="p-1.5 rounded-md bg-white/90 hover:bg-white text-brand-red transition-colors disabled:opacity-50"
                     title="Eliminar"

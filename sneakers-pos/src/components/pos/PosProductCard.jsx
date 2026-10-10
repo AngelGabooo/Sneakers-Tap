@@ -1,3 +1,4 @@
+// src/components/pos/PosProductCard.jsx
 import { Package, Plus } from 'lucide-react'
 
 export default function PosProductCard({ product, onClick }) {
@@ -22,12 +23,17 @@ export default function PosProductCard({ product, onClick }) {
           : 'border-gray-200 dark:border-dark-border hover:border-brand-blue hover:shadow-cardHover cursor-pointer'}
       `}
     >
-      <div className="aspect-square bg-gray-50 dark:bg-dark-surface relative overflow-hidden">
+      {/* 
+        CAMBIO 1: Añadido p-2 (padding) y flex para centrar la imagen.
+        CAMBIO 2: object-cover -> object-contain (para que no se recorte).
+        CAMBIO 3: Quitado group-hover:scale-105 (ya no se agranda ni se corta).
+      */}
+      <div className="aspect-square bg-gray-50 dark:bg-dark-surface relative overflow-hidden p-2 flex items-center justify-center">
         {product.images?.[0]?.url ? (
           <img
             src={product.images[0].url}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -42,14 +48,14 @@ export default function PosProductCard({ product, onClick }) {
         )}
 
         {!outOfStock && (
-          <span className="absolute top-2 right-2 w-6 h-6 rounded-full bg-brand-blue text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="absolute top-2 right-2 w-6 h-6 rounded-full bg-brand-blue text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
             <Plus size={13} strokeWidth={2.4} />
           </span>
         )}
 
         {/* Stock badge */}
         <span className={`
-          absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded
+          absolute top-2 left-2 text-[10px] font-semibold px-1.5 py-0.5 rounded z-10
           ${outOfStock
             ? 'bg-red-100 text-brand-red'
             : stock <= 3
