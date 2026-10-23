@@ -9,15 +9,15 @@ import { fileURLToPath } from 'url'
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-export const PRINTER_NAME = process.env.PRINTER_NAME || 'POS58 Printer'
-export const PRINTER_PORT = process.env.PRINTER_PORT || 'LPT1:'
+// ⭐ CAMBIO 1: Ahora apunta a la impresora nueva "POS80" (JHP-A6)
+export const PRINTER_NAME = process.env.PRINTER_NAME || 'POS80'
+export const PRINTER_PORT = process.env.PRINTER_PORT || 'USB001'
 export const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Brother QL-800'
 
 const PS_SCRIPT = join(__dirname, 'print-raw.ps1')
 
 /**
  * Envia un Buffer RAW a la impresora usando PowerShell + winspool API.
- * 100% nativo de Windows, sin dependencias nativas de Node.
  */
 export async function sendToPrinter(buffer) {
   const tmpFile = join(tmpdir(), `sneakers-ticket-${Date.now()}.bin`)
@@ -54,7 +54,7 @@ const GS  = 0x1d
 const LF  = 0x0a
 
 class EscPosBuilder {
-  constructor(width = 32) {
+  constructor(width = 42) {
     this.width = width
     this.chunks = []
     this.init()
@@ -110,8 +110,20 @@ class EscPosBuilder {
   }
 }
 
+// ⭐ CAMBIO 2: Ancho de 32 → 42 caracteres para papel de 80mm
 export function createPrinter() {
-  return new EscPosBuilder(32)
+  return new EscPosBuilder(42)
+}
+
+// ⭐ NUEVO: Helper con la config actual (útil para /health)
+export function getPrinterConfig() {
+  return {
+    receiptPrinter: PRINTER_NAME,
+    receiptPort: PRINTER_PORT,
+    labelPrinter: LABEL_PRINTER_NAME,
+    charsPerLine: 42,
+    paperWidth: '80mm',
+  }
 }
 
 // =====================================================================
@@ -120,19 +132,6 @@ export function createPrinter() {
 
 const PS_LABEL_SCRIPT = join(__dirname, 'print-label.ps1')
 
-/**
- * Envia una imagen (Buffer PNG/JPG) a la impresora de etiquetas.
- * Usa el driver oficial de Brother en Windows via System.Drawing.Printing.
- *
- * IMPORTANTE: NO se define PaperSize ni Landscape. El driver ya tiene
- * configurado el rollo continuo 62mm x 29mm + corte automatico.
- * Si se define desde aqui, el driver no lo reconoce y sale en blanco.
- *
- * @param {Buffer} imageBuffer - Contenido binario de la imagen (PNG/JPG)
- * @param {Object} [opts]
- * @param {string} [opts.printerName] - Nombre de la impresora
- * @returns {Promise<boolean>}
- */
 export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
   const { printerName = LABEL_PRINTER_NAME } = opts
 
@@ -166,9 +165,6 @@ export async function sendImageToLabelPrinter(imageBuffer, opts = {}) {
   }
 }
 
-/**
- * Decodifica un data URL ("data:image/png;base64,...") a Buffer.
- */
 export function decodeDataUrl(dataUrl) {
   const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl || '')
   if (!m) throw new Error('data URL invalido')

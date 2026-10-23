@@ -1,3 +1,4 @@
+// index.js
 import express from 'express'
 import cors from 'cors'
 import {
@@ -8,6 +9,7 @@ import {
   PRINTER_PORT,
   PRINTER_NAME,
   LABEL_PRINTER_NAME,
+  getPrinterConfig,
 } from './printer.js'
 import { getOpenDrawerBuffer } from './cashdrawer.js'
 
@@ -21,11 +23,14 @@ app.use(express.json({ limit: '10mb' }))
 // Healthcheck
 // -------------------------------------------------------------
 app.get('/health', (req, res) => {
+  const cfg = getPrinterConfig()
   res.json({
     ok: true,
     service: 'sneakers-print-server',
-    receiptPrinter: `${PRINTER_NAME} (${PRINTER_PORT})`,
-    labelPrinter: LABEL_PRINTER_NAME,
+    receiptPrinter: `${cfg.receiptPrinter} (${cfg.receiptPort})`,
+    labelPrinter: cfg.labelPrinter,
+    charsPerLine: cfg.charsPerLine,
+    paperWidth: cfg.paperWidth,
     at: new Date().toISOString(),
   })
 })
@@ -46,7 +51,7 @@ app.post('/open-drawer', async (req, res) => {
 })
 
 // -------------------------------------------------------------
-// Imprimir ticket — TODOS los datos vienen del frontend
+// Imprimir ticket
 // -------------------------------------------------------------
 app.post('/print-receipt', async (req, res) => {
   try {
@@ -55,7 +60,6 @@ app.post('/print-receipt', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Falta el objeto "sale"' })
     }
 
-    // DEBUG
     console.log('📥 Datos recibidos del frontend:')
     console.log(JSON.stringify({
       folio: sale.folio,
@@ -149,15 +153,30 @@ app.post('/print-receipt', async (req, res) => {
       if (m === 'card')     return `Tarjeta (${cardType === 'credit' ? 'Credito' : 'Debito'})`
       if (m === 'transfer') return 'Transferencia'
       if (m === 'digital')  return 'Pago digital'
+      if (m === 'mixed')    return 'Mixto (Efec + Transf)'
+      if (m === 'credit')   return 'Credito'
       if (m === 'other')    return 'Otro'
       return sale.payment?.methodLabel || 'Otro'
     })()
 
     printer.println(`Metodo:   ${methodLabel}`)
 
+    // Efectivo puro
     if (sale.payment?.method === 'cash') {
       printer.println(`Recibido: $${Number(sale.payment.cashReceived || 0).toLocaleString('es-MX')}`)
       printer.println(`Cambio:   $${Number(sale.payment.change || 0).toLocaleString('es-MX')}`)
+    }
+
+    // Pago mixto
+    if (sale.payment?.method === 'mixed') {
+      const cashPart = Number(sale.payment.cashReceived || 0)
+      const transferPart = Number(sale.payment.transferReceived || 0)
+      if (cashPart > 0) {
+        printer.println(`  Efectivo:  $${cashPart.toLocaleString('es-MX')}`)
+      }
+      if (transferPart > 0) {
+        printer.println(`  Transf:    $${transferPart.toLocaleString('es-MX')}`)
+      }
     }
 
     if (sale.payment?.reference) {
@@ -177,10 +196,19 @@ app.post('/print-receipt', async (req, res) => {
 
     // -------- ENVIAR --------
     const buffer = printer.getBuffer()
-    await sendToPrinter(buffer)
-
-    console.log(`✅ Ticket impreso · ${sale.folio}`)
-    res.json({ ok: true, action: 'print-receipt', folio: sale.folio })
+    try {
+      await sendToPrinter(buffer)
+      console.log(`✅ Ticket impreso · ${sale.folio}`)
+      res.json({ ok: true, action: 'print-receipt', folio: sale.folio })
+    } catch (printErr) {
+      console.error(`❌ Error al imprimir ticket (${PRINTER_NAME}):`, printErr.message)
+      res.json({
+        ok: true,
+        action: 'print-receipt',
+        folio: sale.folio,
+        warning: `Ticket no impreso. Verifica la impresora ${PRINTER_NAME}.`,
+      })
+    }
   } catch (err) {
     console.error('❌ Error al imprimir:', err.message)
     res.status(500).json({ ok: false, error: err.message })
@@ -188,10 +216,7 @@ app.post('/print-receipt', async (req, res) => {
 })
 
 // -------------------------------------------------------------
-// Imprimir etiqueta(s) en Brother QL-800 (DK-1201 · 29×90 mm)
-// Body:
-//   { imageDataUrl: "data:image/png;base64,..." }   → 1 etiqueta
-//   { images: ["data:image/png;base64,...", ...] }  → lote
+// Imprimir etiqueta(s) en Brother QL-800
 // -------------------------------------------------------------
 app.post('/print-label', async (req, res) => {
   try {
@@ -217,9 +242,6 @@ app.post('/print-label', async (req, res) => {
       const buffer = decodeDataUrl(dataUrl)
       await sendImageToLabelPrinter(buffer, {
         printerName: LABEL_PRINTER_NAME,
-        paperWidth: 114,   // DK-1201 29mm
-        paperHeight: 354,  // DK-1201 90mm
-        landscape: true,   // ✅ el driver rota
       })
       printed++
     }
