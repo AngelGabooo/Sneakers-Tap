@@ -168,9 +168,6 @@ export const creditRepo = {
     }
   },
 
-  /**
-   * Otorga un nuevo crédito.
-   */
   async create({ credit, receivedBy }) {
     const isOnline = navigator.onLine
     const id = isOnline && crypto?.randomUUID ? crypto.randomUUID() : generateLocalId('credit')
@@ -186,7 +183,7 @@ export const creditRepo = {
       paidAmount: 0,
       outstanding: 0,
       available: amount,
-      balance: amount,                 // compat
+      balance: amount,
       dueDate: credit.dueDate,
       status: 'active',
       notes: credit.notes || null,
@@ -240,10 +237,6 @@ export const creditRepo = {
     return localCredit
   },
 
-  /**
-   * ⭐ Registra un CARGO (venta a crédito).
-   *    Aumenta used y reduce el saldo disponible.
-   */
   async registerCharge({ charge, receivedBy }) {
     const isOnline = navigator.onLine
     const now = new Date().toISOString()
@@ -314,9 +307,6 @@ export const creditRepo = {
     return updatedCredit
   },
 
-  /**
-   * Registra un pago.
-   */
   async registerPayment({ payment, receivedBy }) {
     const isOnline = navigator.onLine
     const id = isOnline && crypto?.randomUUID ? crypto.randomUUID() : generateLocalId('pay')
@@ -404,7 +394,15 @@ export const creditRepo = {
       priority: PRIORITY.HIGH,
     })
 
-    return { payment: localPayment, credit: updatedCredit }
+    // ⭐ EL TRUCO ESTÁ AQUÍ:
+    // Si falló Supabase (o estamos offline), inyectamos el pago manualmente 
+    // al objeto credit para que el Drawer lo pinte de inmediato.
+    const creditWithPayment = await hydrateCredit(updatedCredit)
+
+    return { 
+      payment: localPayment, 
+      credit: creditWithPayment 
+    }
   },
 
   async cancel(id, { reason, cancelledBy }) {

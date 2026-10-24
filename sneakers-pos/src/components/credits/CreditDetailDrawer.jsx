@@ -1,26 +1,17 @@
 // src/components/credits/CreditDetailDrawer.jsx
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   X, HandCoins, AlertTriangle, CheckCircle2, Clock, Ban,
-  User, Calendar, FileText, Trash2, ShoppingCart, TrendingDown,
+  User, Calendar, Trash2, ShoppingCart, Printer
 } from 'lucide-react'
 import Badge from '../common/Badge'
 import Button from '../common/Button'
 import { useSales } from '../../context/SalesContext'
+import { printReceipt } from '../../services/printerService'
 
 const fmt = (n) => `$${Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 })}`
-
-const fmtDate = (iso) => {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
-const fmtDateTime = (iso) => {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('es-MX', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-}
+const fmtDate = (iso) => !iso ? '—' : new Date(iso).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })
+const fmtDateTime = (iso) => !iso ? '—' : new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const STATUS_CONFIG = {
   active:    { label: 'Activo',    variant: 'info',    icon: Clock },
@@ -31,64 +22,56 @@ const STATUS_CONFIG = {
 
 export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCancel, onViewCustomer }) {
   const { sales } = useSales()
+  const [printingId, setPrintingId] = useState(null)
 
-  // ⭐ Calcular los CARGOS (ventas a crédito) para este crédito
   const charges = useMemo(() => {
     if (!open || !credit) return []
-
     const createdAt = new Date(credit.createdAt).getTime()
-
     return sales
-      .filter((s) => {
-        if (s.customerId !== credit.customerId) return false
-        if (s.payment?.method !== 'credit') return false
-        if (s.status === 'cancelled') return false
-        const d = new Date(s.createdAt).getTime()
-        return d >= createdAt
-      })
+      .filter((s) => s.customerId === credit.customerId && s.payment?.method === 'credit' && s.status !== 'cancelled' && new Date(s.createdAt).getTime() >= createdAt)
       .map((s) => ({
-        id: s.id,
-        folio: s.folio,
-        amount: Number(s.total) || 0,
-        createdAt: s.createdAt,
-        itemsCount: (s.items || []).reduce((a, i) => a + (Number(i.quantity) || 0), 0),
-        type: 'charge',
+        id: s.id, folio: s.folio, amount: Number(s.total) || 0, createdAt: s.createdAt, type: 'charge'
       }))
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
   }, [open, credit, sales])
 
-  // ⭐ Pagos desde credit.payments
   const payments = useMemo(() => {
     if (!open || !credit) return []
-    return (credit.payments || [])
-      .map((p) => ({ ...p, type: 'payment' }))
-      .sort((a, b) => new Date(b.paidAt) - new Date(a.paidAt))
+    const raw = Array.isArray(credit.payments) ? credit.payments : []
+    return raw.map((p) => ({ ...p, type: 'payment' }))
   }, [open, credit])
 
-  // ⭐ Timeline combinada (cargos + pagos)
   const timeline = useMemo(() => {
-    const combined = [...charges, ...payments]
-    return combined.sort((a, b) => {
-      const ta = new Date(a.createdAt || a.paidAt).getTime()
-      const tb = new Date(b.createdAt || b.paidAt).getTime()
-      return tb - ta
-    })
+    return [...charges, ...payments].sort((a, b) => new Date(b.createdAt || b.paidAt) - new Date(a.createdAt || a.paidAt))
   }, [charges, payments])
 
-  // 🆕 Totales para el resumen
-  const totals = useMemo(() => {
-    const totalCharges = charges.reduce((a, c) => a + c.amount, 0)
-    const totalPayments = payments.reduce((a, p) => a + (Number(p.amount) || 0), 0)
-    return {
-      totalCharges,
-      totalPayments,
-      paymentsCount: payments.length,
-      chargesCount: charges.length,
+  const handlePrintPayment = async (payment) => {
+    try {
+      setPrintingId(payment.id)
+      const amountPaid = Number(payment.amount) || 0
+      const outstandingBefore = Number(payment.previousOutstanding) || (Number(credit.outstanding) + amountPaid)
+      const outstandingAfter = outstandingBefore - amountPaid
+
+      await printReceipt({
+        folio: `AB-${payment.id.slice(-6).toUpperCase()}`,
+        createdAt: payment.paidAt || new Date().toISOString(),
+        cashier: credit.customerName,
+        isCreditPayment: true,
+        total: amountPaid,
+        totals: { subtotal: amountPaid },
+        items: [{ productName: `Abono a crédito: ${credit.customerName}`, quantity: 1, price: amountPaid }],
+        payment: { method: payment.method, amountPaid, previousOutstanding: outstandingBefore, newOutstanding: outstandingAfter },
+        ticketHeader: { name: 'SNEAKER TAP', tagline: 'Recibo de Abono' },
+        ticketFooter: { thankYouMessage: '¡Gracias por su pago!', name: 'SNEAKER TAP' },
+        ticketOptions: { showNumber: true, showDate: true, showTime: true, showSeller: false, showCustomer: true }
+      })
+    } catch (error) {
+      alert('No se pudo imprimir el ticket.')
+    } finally {
+      setPrintingId(null)
     }
-  }, [charges, payments])
+  }
 
   if (!open || !credit) return null
-
   const cfg = STATUS_CONFIG[credit.status] || STATUS_CONFIG.active
   const StatusIcon = cfg.icon
   const canPay = (credit.status === 'active' || credit.status === 'overdue') && (credit.outstanding > 0)
@@ -96,193 +79,58 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
 
   return (
     <div className="fixed inset-0 z-[80] flex justify-end bg-black/50 backdrop-blur-sm">
-      {/* Backdrop */}
       <div className="flex-1" onClick={onClose} />
-
-      {/* Drawer */}
-      <div className="w-full max-w-lg h-full flex flex-col bg-white dark:bg-dark-card border-l border-gray-200 dark:border-dark-border shadow-2xl animate-in slide-in-from-right duration-200">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-dark-border shrink-0">
+      <div className="w-full max-w-lg h-full flex flex-col bg-white dark:bg-dark-card border-l border-gray-200 dark:border-dark-border shadow-2xl">
+        
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <div className="min-w-0 flex-1">
-            <h3 className="text-base font-bold text-brand-black dark:text-dark-text truncate">
-              {credit.customerName}
-            </h3>
-            <div className="mt-1">
-              <Badge variant={cfg.variant}>
-                <StatusIcon size={11} strokeWidth={2.4} />
-                {cfg.label}
-              </Badge>
-            </div>
+            <h3 className="text-base font-bold truncate">{credit.customerName}</h3>
+            <div className="mt-1"><Badge variant={cfg.variant}><StatusIcon size={11} /> {cfg.label}</Badge></div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-brand-black dark:hover:text-dark-text transition-colors shrink-0 ml-2"
-            aria-label="Cerrar"
-          >
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-brand-black ml-2"><X size={20} /></button>
         </div>
 
-        {/* Contenido scrollable */}
         <div className="flex-1 overflow-y-auto">
-          {/* Resumen 4 columnas */}
-          <div className="p-5 border-b border-gray-100 dark:border-dark-border">
+          <div className="p-5 border-b border-gray-100">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div className="text-center p-2 rounded-lg bg-gray-50 dark:bg-dark-surface">
-                <p className="text-[10px] uppercase text-gray-400 dark:text-dark-muted mb-0.5">Límite</p>
-                <p className="text-sm font-bold text-brand-black dark:text-dark-text">{fmt(credit.amount)}</p>
-              </div>
-              <div className="text-center p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30">
-                <p className="text-[10px] uppercase text-amber-600 dark:text-amber-400 mb-0.5">Usado</p>
-                <p className="text-sm font-bold text-amber-700 dark:text-amber-300">{fmt(credit.used)}</p>
-              </div>
-              <div className="text-center p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30">
-                <p className="text-[10px] uppercase text-emerald-600 dark:text-emerald-400 mb-0.5">Pagado</p>
-                <p className="text-sm font-bold text-emerald-700 dark:text-emerald-300">{fmt(credit.paidAmount)}</p>
-              </div>
-              <div className="text-center p-2 rounded-lg bg-blue-50 dark:bg-blue-950/30">
-                <p className="text-[10px] uppercase text-brand-blue mb-0.5">Disponible</p>
-                <p className="text-sm font-bold text-brand-blueDark dark:text-blue-200">{fmt(credit.available)}</p>
-              </div>
+              <div className="text-center p-2 rounded-lg bg-gray-50"><p className="text-[10px] text-gray-400 uppercase">Límite</p><p className="text-sm font-bold">{fmt(credit.amount)}</p></div>
+              <div className="text-center p-2 rounded-lg bg-amber-50"><p className="text-[10px] text-amber-600 uppercase">Usado</p><p className="text-sm font-bold text-amber-700">{fmt(credit.used)}</p></div>
+              <div className="text-center p-2 rounded-lg bg-emerald-50"><p className="text-[10px] text-emerald-600 uppercase">Pagado</p><p className="text-sm font-bold text-emerald-700">{fmt(credit.paidAmount)}</p></div>
+              <div className="text-center p-2 rounded-lg bg-blue-50"><p className="text-[10px] text-brand-blue uppercase">Disponible</p><p className="text-sm font-bold text-brand-blueDark">{fmt(credit.available)}</p></div>
             </div>
-
-            {/* Deuda pendiente */}
             {credit.outstanding > 0 && (
-              <div className="mt-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 flex justify-between items-center">
-                <span className="text-xs text-amber-800 dark:text-amber-300 font-medium">
-                  Deuda pendiente
-                </span>
-                <span className="text-base font-bold text-amber-900 dark:text-amber-200">
-                  {fmt(credit.outstanding)}
-                </span>
+              <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 flex justify-between items-center">
+                <span className="text-xs text-amber-800 font-medium">Deuda pendiente</span>
+                <span className="text-base font-bold text-amber-900">{fmt(credit.outstanding)}</span>
               </div>
             )}
           </div>
 
-          {/* Info */}
-          <div className="p-5 border-b border-gray-100 dark:border-dark-border space-y-3">
-            <InfoRow icon={User} label="Cliente" value={credit.customerName} />
-            <InfoRow icon={Calendar} label="Otorgado" value={fmtDate(credit.createdAt)} />
-            <InfoRow
-              icon={Calendar}
-              label="Vence"
-              value={fmtDate(credit.dueDate)}
-              tone={credit.status === 'overdue' ? 'danger' : 'neutral'}
-            />
-            {credit.notes && (
-              <InfoRow icon={FileText} label="Notas" value={credit.notes} />
-            )}
-          </div>
-
-          {/* 🆕 Resumen de abonos */}
-          {(totals.chargesCount > 0 || totals.paymentsCount > 0) && (
-            <div className="p-5 border-b border-gray-100 dark:border-dark-border">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg bg-red-50/60 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <TrendingDown size={12} className="text-brand-red" strokeWidth={2.2} />
-                    <p className="text-[10px] uppercase text-brand-red font-semibold">Cargos</p>
-                  </div>
-                  <p className="text-base font-bold text-brand-red">{fmt(totals.totalCharges)}</p>
-                  <p className="text-[10px] text-gray-500 dark:text-dark-muted mt-0.5">
-                    {totals.chargesCount} {totals.chargesCount === 1 ? 'venta' : 'ventas'} a crédito
-                  </p>
-                </div>
-                <div className="p-3 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <HandCoins size={12} className="text-emerald-600 dark:text-emerald-400" strokeWidth={2.2} />
-                    <p className="text-[10px] uppercase text-emerald-600 dark:text-emerald-400 font-semibold">Abonos</p>
-                  </div>
-                  <p className="text-base font-bold text-emerald-600 dark:text-emerald-400">{fmt(totals.totalPayments)}</p>
-                  <p className="text-[10px] text-gray-500 dark:text-dark-muted mt-0.5">
-                    {totals.paymentsCount} {totals.paymentsCount === 1 ? 'abono' : 'abonos'} registrados
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Historial combinado (cargos + pagos) */}
           <div className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-brand-black dark:text-dark-text">
-                Historial de movimientos
-              </h4>
-              <span className="text-[11px] text-gray-500 dark:text-dark-muted">
-                {timeline.length} {timeline.length === 1 ? 'movimiento' : 'movimientos'}
-              </span>
-            </div>
-
-            {timeline.length === 0 ? (
-              <div className="text-center py-6">
-                <p className="text-xs text-gray-500 dark:text-dark-muted">
-                  Sin movimientos registrados todavía.
-                </p>
-              </div>
-            ) : (
+            <h4 className="text-sm font-semibold mb-3">Historial de movimientos</h4>
+            {timeline.length === 0 ? <p className="text-xs text-gray-500">Sin movimientos.</p> : (
               <ul className="space-y-2">
                 {timeline.map((item) => {
                   if (item.type === 'charge') {
                     return (
-                      <li
-                        key={`charge-${item.id}`}
-                        className="
-                          flex items-center justify-between gap-3
-                          p-3 rounded-lg border border-red-100 dark:border-red-900/40
-                          bg-red-50/40 dark:bg-red-950/20
-                        "
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-950/40 flex items-center justify-center shrink-0">
-                            <ShoppingCart size={14} className="text-brand-red" strokeWidth={2.2} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-brand-red">
-                              - {fmt(item.amount)}
-                            </p>
-                            <p className="text-[11px] text-gray-500 dark:text-dark-muted truncate">
-                              Venta {item.folio} · {item.itemsCount} {item.itemsCount === 1 ? 'artículo' : 'artículos'}
-                            </p>
-                            <p className="text-[10px] text-gray-400 dark:text-dark-muted">
-                              {fmtDateTime(item.createdAt)}
-                            </p>
-                          </div>
-                        </div>
+                      <li key={`charge-${item.id}`} className="flex items-center gap-3 p-3 rounded-lg border border-red-100 bg-red-50/40">
+                        <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center shrink-0"><ShoppingCart size={14} className="text-brand-red" /></div>
+                        <div><p className="text-sm font-semibold text-brand-red">- {fmt(item.amount)}</p><p className="text-[10px] text-gray-500">{fmtDateTime(item.createdAt)}</p></div>
                       </li>
                     )
                   }
-
-                  // Pago
                   return (
-                    <li
-                      key={`payment-${item.id}`}
-                      className="
-                        flex items-center justify-between gap-3
-                        p-3 rounded-lg border border-emerald-100 dark:border-emerald-900/40
-                        bg-emerald-50/40 dark:bg-emerald-950/20
-                      "
-                    >
+                    <li key={`payment-${item.id}`} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg border border-emerald-100 bg-emerald-50/40">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center shrink-0">
-                          <HandCoins size={14} className="text-emerald-600 dark:text-emerald-400" strokeWidth={2.2} />
-                        </div>
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0"><HandCoins size={14} className="text-emerald-600" /></div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                            + {fmt(item.amount)}
-                          </p>
-                          <p className="text-[11px] text-gray-500 dark:text-dark-muted">
-                            {methodLabel(item.method)} · {item.receivedByName || '—'}
-                          </p>
-                          <p className="text-[10px] text-gray-400 dark:text-dark-muted">
-                            {fmtDateTime(item.paidAt)}
-                          </p>
-                          {item.notes && (
-                            <p className="text-[10px] text-gray-400 dark:text-dark-muted italic mt-0.5">
-                              {item.notes}
-                            </p>
-                          )}
+                          <p className="text-sm font-semibold text-emerald-600">+ {fmt(item.amount)}</p>
+                          <p className="text-[10px] text-gray-500">{fmtDateTime(item.paidAt)}</p>
                         </div>
                       </div>
+                      <button onClick={() => handlePrintPayment(item)} disabled={printingId === item.id} className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 transition-colors shrink-0 disabled:opacity-50">
+                        {printingId === item.id ? <div className="w-4 h-4 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin" /> : <><Printer size={14} /> Imprimir</>}
+                      </button>
                     </li>
                   )
                 })}
@@ -291,65 +139,14 @@ export default function CreditDetailDrawer({ open, credit, onClose, onPay, onCan
           </div>
         </div>
 
-        {/* Footer sticky */}
-        <div className="p-4 border-t border-gray-100 dark:border-dark-border shrink-0 space-y-2">
-          {canPay && (
-            <Button
-              variant="primary"
-              icon={HandCoins}
-              className="w-full"
-              onClick={() => onPay?.(credit)}
-            >
-              Abonar
-            </Button>
-          )}
+        <div className="p-4 border-t border-gray-100 shrink-0 space-y-2">
+          {canPay && <Button variant="primary" icon={HandCoins} className="w-full" onClick={() => onPay?.(credit)}>Abonar</Button>}
           <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              icon={User}
-              className="flex-1"
-              onClick={() => onViewCustomer?.(credit)}
-            >
-              Ver cliente
-            </Button>
-            {canCancel && (
-              <Button
-                variant="danger"
-                icon={Trash2}
-                onClick={() => onCancel?.(credit)}
-              >
-                Cancelar
-              </Button>
-            )}
+            <Button variant="secondary" icon={User} className="flex-1" onClick={() => onViewCustomer?.(credit)}>Ver cliente</Button>
+            {canCancel && <Button variant="danger" icon={Trash2} onClick={() => onCancel?.(credit)}>Cancelar</Button>}
           </div>
         </div>
       </div>
     </div>
   )
-}
-
-function InfoRow({ icon: Icon, label, value, tone = 'neutral' }) {
-  const tones = {
-    neutral: 'text-brand-black dark:text-dark-text',
-    danger:  'text-brand-red',
-  }
-  return (
-    <div className="flex items-start gap-3">
-      <Icon size={15} className="text-gray-400 mt-0.5 shrink-0" strokeWidth={2} />
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] uppercase tracking-wider text-gray-400 dark:text-dark-muted">
-          {label}
-        </p>
-        <p className={`text-sm font-medium ${tones[tone]}`}>{value}</p>
-      </div>
-    </div>
-  )
-}
-
-function methodLabel(m) {
-  if (m === 'cash') return 'Efectivo'
-  if (m === 'card') return 'Tarjeta'
-  if (m === 'transfer') return 'Transferencia'
-  if (m === 'credit') return 'Crédito'
-  return m || 'Otro'
 }

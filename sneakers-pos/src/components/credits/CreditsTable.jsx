@@ -1,5 +1,5 @@
 // src/components/credits/CreditsTable.jsx
-import { ChevronLeft, ChevronRight, ArrowUpDown, AlertTriangle, CheckCircle2, Clock, Ban, Eye, HandCoins } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ArrowUpDown, AlertTriangle, CheckCircle2, Clock, Ban, Eye, HandCoins, Trash2 } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
 
@@ -31,6 +31,7 @@ export default function CreditsTable({
   onSortChange,
   onViewDetail,
   onPay,
+  onCancel, // 👈 NUEVO
   onViewCustomer,
   page,
   perPage,
@@ -100,6 +101,7 @@ export default function CreditsTable({
               const days = daysUntil(c.dueDate)
               const isOverdue = c.status === 'overdue'
               const hasDebt = Number(c.outstanding || 0) > 0
+              const hasActivity = Number(c.used || 0) > 0 || Number(c.paidAmount || 0) > 0
 
               return (
                 <tr
@@ -179,6 +181,18 @@ export default function CreditsTable({
                         >
                           <HandCoins size={11} strokeWidth={2.4} />
                           Abonar
+                        </button>
+                      )}
+                      
+                      {/* 👈 NUEVO BOTÓN DE BORRAR */}
+                      {c.status === 'active' && !hasActivity && (
+                        <button
+                          type="button"
+                          onClick={() => onCancel?.(c)}
+                          className="p-1.5 rounded-md text-gray-400 hover:text-brand-red hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                          title="Eliminar crédito"
+                        >
+                          <Trash2 size={15} />
                         </button>
                       )}
                     </div>

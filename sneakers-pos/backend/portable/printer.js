@@ -9,7 +9,6 @@ import { fileURLToPath } from 'url'
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// ⭐ CAMBIO 1: Ahora apunta a la impresora nueva "POS80" (JHP-A6)
 export const PRINTER_NAME = process.env.PRINTER_NAME || 'POS80'
 export const PRINTER_PORT = process.env.PRINTER_PORT || 'USB001'
 export const LABEL_PRINTER_NAME = process.env.LABEL_PRINTER_NAME || 'Brother QL-800'
@@ -102,20 +101,26 @@ class EscPosBuilder {
     return this.raw(ESC, 0x70, pin === 1 ? 0x01 : 0x00, 0x32, 0x32)
   }
 
-  cut() { return this.raw(GS, 0x56, 0x00) }
+  // ⭐ NUEVO: Comando para avanzar el papel (Feed)
+  feed(lines = 1) {
+    return this.raw(ESC, 0x64, lines)
+  }
+
+  // ⭐ MODIFICADO: Avanza 6 líneas antes de cortar para que no corte el texto
+  cut() { 
+    return this.feed(6).raw(GS, 0x56, 0x42, 0x00) 
+  }
 
   getBuffer() {
-    this.raw(LF, LF, LF)
+    // Se eliminaron los LF extra de aquí porque ahora el cut() ya alimenta el papel
     return Buffer.concat(this.chunks)
   }
 }
 
-// ⭐ CAMBIO 2: Ancho de 32 → 42 caracteres para papel de 80mm
 export function createPrinter() {
   return new EscPosBuilder(42)
 }
 
-// ⭐ NUEVO: Helper con la config actual (útil para /health)
 export function getPrinterConfig() {
   return {
     receiptPrinter: PRINTER_NAME,

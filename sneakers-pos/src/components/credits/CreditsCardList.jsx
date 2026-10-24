@@ -1,5 +1,5 @@
 // src/components/credits/CreditsCardList.jsx
-import { AlertTriangle, CheckCircle2, Clock, Ban, HandCoins } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, Ban, HandCoins, Trash2 } from 'lucide-react'
 import Card from '../common/Card'
 import Badge from '../common/Badge'
 
@@ -23,7 +23,7 @@ const STATUS_CONFIG = {
   cancelled: { label: 'Cancelado', variant: 'neutral', icon: Ban },
 }
 
-export default function CreditsCardList({ credits, loading, onViewDetail, onPay }) {
+export default function CreditsCardList({ credits, loading, onViewDetail, onPay, onCancel }) {
   if (loading) {
     return (
       <div className="space-y-3">
@@ -57,6 +57,7 @@ export default function CreditsCardList({ credits, loading, onViewDetail, onPay 
         const days = daysUntil(c.dueDate)
         const isOverdue = c.status === 'overdue'
         const hasDebt = Number(c.outstanding || 0) > 0
+        const hasActivity = Number(c.used || 0) > 0 || Number(c.paidAmount || 0) > 0
 
         return (
           <Card key={c.id}>
@@ -111,6 +112,19 @@ export default function CreditsCardList({ credits, loading, onViewDetail, onPay 
               >
                 Ver detalle
               </button>
+              
+              {/* 👈 BOTÓN DE BORRAR EN MÓVIL */}
+              {c.status === 'active' && !hasActivity && (
+                <button
+                  type="button"
+                  onClick={() => onCancel?.(c)}
+                  className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 border border-gray-200 dark:border-dark-border hover:text-brand-red hover:border-brand-red transition-colors"
+                  title="Eliminar crédito"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+
               {(c.status === 'active' || c.status === 'overdue') && (
                 <button
                   type="button"

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import Toast from '../components/common/Toast'
+import ConfirmModal from '../components/common/ConfirmModal' // 👈 IMPORTAMOS TU MODAL
 import CreditsHeader from '../components/credits/CreditsHeader'
 import CreditsStats from '../components/credits/CreditsStats'
 import CreditsToolbar from '../components/credits/CreditsToolbar'
@@ -37,16 +38,16 @@ export default function Credits() {
   const [detailTarget, setDetailTarget] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [toast, setToast] = useState(null)
-
-  // 🆕 Sesión de caja activa (se recalcula cada vez que se abre el modal)
   const [activeSession, setActiveSession] = useState(null)
+
+  // 🆕 Estado para el ConfirmModal
+  const [cancelTarget, setCancelTarget] = useState(null)
 
   useEffect(() => {
     setLoading(true)
     refresh().finally(() => setLoading(false))
-  }, []) // eslint-disable-line
+  }, [])
 
-  // 🆕 Cada vez que se abre el modal de abono, consultamos la caja abierta
   useEffect(() => {
     if (paymentTarget) {
       setActiveSession(getAnyOpenSession())
@@ -55,14 +56,9 @@ export default function Credits() {
     }
   }, [paymentTarget, getAnyOpenSession])
 
-  // ⭐ Filtros
   const filtered = useMemo(() => {
     let list = [...credits]
-
-    if (quickFilter !== 'all') {
-      list = list.filter((c) => c.status === quickFilter)
-    }
-
+    if (quickFilter !== 'all') list = list.filter((c) => c.status === quickFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((c) =>
@@ -70,7 +66,6 @@ export default function Credits() {
         (c.notes || '').toLowerCase().includes(q),
       )
     }
-
     const dir = sort.direction === 'asc' ? 1 : -1
     list.sort((a, b) => {
       const va = a[sort.field] ?? ''
@@ -78,7 +73,6 @@ export default function Credits() {
       if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
       return String(va).localeCompare(String(vb)) * dir
     })
-
     return list
   }, [credits, quickFilter, search, sort])
 
@@ -123,11 +117,7 @@ export default function Credits() {
           dueDate,
           notes,
         },
-        receivedBy: {
-          id: user?.id,
-          name: user?.name,
-          role: user?.role,
-        },
+        receivedBy: { id: user?.id, name: user?.name, role: user?.role },
       })
 
       setNewOpen(false)
@@ -145,7 +135,6 @@ export default function Credits() {
   const handlePayment = async ({ creditId, amount, method, notes, cashSessionId }) => {
     setSubmitting(true)
     try {
-      // 🆕 Validación: efectivo requiere caja
       if (method === 'cash' && !cashSessionId) {
         throw new Error('Debes abrir una caja antes de abonar en efectivo.')
       }
@@ -155,7 +144,7 @@ export default function Credits() {
 
       const wasFullPayment = Math.abs(amount - Number(credit.outstanding || 0)) < 0.01
 
-      await registerPayment({
+      const result = await registerPayment({
         payment: {
           creditId,
           customerId: credit.customerId,
@@ -164,15 +153,27 @@ export default function Credits() {
           notes,
           cashSessionId: cashSessionId || null,
         },
-        receivedBy: {
-          id: user?.id,
-          name: user?.name,
-          role: user?.role,
-        },
+        receivedBy: { id: user?.id, name: user?.name, role: user?.role },
       })
 
       setPaymentTarget(null)
-      setDetailTarget(null)
+
+      if (result && result.payment) {
+        const newPayments = Array.isArray(credit.payments) ? [...credit.payments] : []
+        newPayments.push(result.payment)
+
+        const updatedCreditForDrawer = {
+          ...credit,
+          paidAmount: Number(credit.paidAmount || 0) + amount,
+          outstanding: Number(credit.outstanding || 0) - amount,
+          payments: newPayments
+        }
+
+        setDetailTarget(updatedCreditForDrawer)
+      } else {
+        setDetailTarget(credits.find(c => c.id === creditId) || null)
+      }
+
       setToast({
         title: wasFullPayment ? '✅ Crédito liquidado' : '✅ Abono registrado',
         description: wasFullPayment
@@ -186,17 +187,27 @@ export default function Credits() {
     }
   }
 
-  const handleCancel = async (credit) => {
-    if (!window.confirm(`¿Cancelar el crédito de ${credit.customerName}? Esta acción no borra los pagos ya registrados.`)) return
+  // ⭐ ELIMINAR: Ahora solo abre el modal
+  const handleCancelRequest = (credit) => {
+    setCancelTarget(credit)
+  }
+
+  // ⭐ ELIMINAR: Se ejecuta al dar "Eliminar" en el modal
+  const handleCancelConfirm = async () => {
+    if (!cancelTarget) return
+    setSubmitting(true)
     try {
-      await cancelCredit(credit.id, {
-        reason: 'Cancelado manualmente',
+      await cancelCredit(cancelTarget.id, {
+        reason: 'Eliminado manualmente',
         cancelledBy: { id: user?.id, name: user?.name },
       })
+      setCancelTarget(null)
       setDetailTarget(null)
-      setToast({ title: 'Crédito cancelado' })
+      setToast({ title: 'Crédito eliminado', description: 'El crédito fue removido correctamente.' })
     } catch (err) {
-      setToast({ title: 'Error', description: err.message })
+      setToast({ title: 'Error al eliminar', description: err.message })
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -216,37 +227,18 @@ export default function Credits() {
   }, [wholesales, credits])
 
   return (
-    <DashboardLayout
-      activeKey="credits"
-      onNavigate={handleNavigate}
-      period={undefined}
-      onPeriodChange={undefined}
-    >
+    <DashboardLayout activeKey="credits" onNavigate={handleNavigate} period={undefined} onPeriodChange={undefined}>
       <nav className="flex items-center gap-1.5 text-sm mb-5">
         <span className="text-gray-500 dark:text-dark-muted">Operación</span>
         <ChevronRight size={14} className="text-gray-400" />
         <span className="text-brand-black dark:text-dark-text font-medium">Créditos</span>
       </nav>
 
-      <CreditsHeader
-        onNew={() => setNewOpen(true)}
-        stats={stats}
-      />
-
+      <CreditsHeader onNew={() => setNewOpen(true)} stats={stats} />
       <CreditsStats stats={stats} />
+      <CreditsToolbar search={search} onSearchChange={(v) => { setSearch(v); setPage(1) }} />
+      <CreditsQuickFilters active={quickFilter} counts={quickCounts} onChange={(v) => { setQuickFilter(v); setPage(1) }} />
 
-      <CreditsToolbar
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1) }}
-      />
-
-      <CreditsQuickFilters
-        active={quickFilter}
-        counts={quickCounts}
-        onChange={(v) => { setQuickFilter(v); setPage(1) }}
-      />
-
-      {/* Desktop: tabla */}
       <div className="hidden md:block">
         <CreditsTable
           credits={paged}
@@ -255,6 +247,7 @@ export default function Credits() {
           onSortChange={setSort}
           onViewDetail={setDetailTarget}
           onPay={setPaymentTarget}
+          onCancel={handleCancelRequest} // 👈 Abre el modal
           onViewCustomer={handleGoToWholesale}
           page={page}
           perPage={perPage}
@@ -264,17 +257,16 @@ export default function Credits() {
         />
       </div>
 
-      {/* Móvil: cards */}
       <div className="md:hidden">
         <CreditsCardList
           credits={paged}
           loading={loading}
           onViewDetail={setDetailTarget}
           onPay={setPaymentTarget}
+          onCancel={handleCancelRequest} // 👈 Abre el modal
         />
       </div>
 
-      {/* Modales */}
       <CreditNewModal
         open={newOpen}
         onClose={() => setNewOpen(false)}
@@ -297,8 +289,21 @@ export default function Credits() {
         credit={detailTarget}
         onClose={() => setDetailTarget(null)}
         onPay={(c) => { setDetailTarget(null); setPaymentTarget(c) }}
-        onCancel={handleCancel}
+        onCancel={handleCancelRequest} // 👈 Abre el modal
         onViewCustomer={handleGoToWholesale}
+      />
+
+      {/* ⭐ AQUÍ ESTÁ TU MODAL DE CONFIRMACIÓN PERSONALIZADO */}
+      <ConfirmModal
+        open={!!cancelTarget}
+        tone="danger"
+        title="Eliminar crédito"
+        description={`¿Estás seguro de que deseas eliminar el crédito de ${cancelTarget?.customerName}? Esta acción liberará su límite y no se puede deshacer.`}
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        loading={submitting}
+        onConfirm={handleCancelConfirm}
+        onCancel={() => setCancelTarget(null)}
       />
 
       <Toast

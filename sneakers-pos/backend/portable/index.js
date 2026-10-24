@@ -42,7 +42,7 @@ app.post('/open-drawer', async (req, res) => {
   try {
     const buffer = getOpenDrawerBuffer(0) // pin 2
     await sendToPrinter(buffer)
-    console.log('✅ Cajón abierto desde el POS')
+    console.log('✅ Cajón abierto manualmente desde el POS')
     res.json({ ok: true, action: 'open-drawer' })
   } catch (err) {
     console.error('❌ Error al abrir el cajón:', err.message)
@@ -51,7 +51,7 @@ app.post('/open-drawer', async (req, res) => {
 })
 
 // -------------------------------------------------------------
-// Imprimir ticket
+// Imprimir ticket (Ventas, Abonos, etc)
 // -------------------------------------------------------------
 app.post('/print-receipt', async (req, res) => {
   try {
@@ -64,11 +64,29 @@ app.post('/print-receipt', async (req, res) => {
     console.log(JSON.stringify({
       folio: sale.folio,
       payment: sale.payment,
+      isCreditPayment: sale.isCreditPayment,
       itemsCount: (sale.items || []).length,
       ticketHeader: sale.ticketHeader,
       ticketOptions: sale.ticketOptions,
       ticketFooter: sale.ticketFooter,
     }, null, 2))
+
+    // ⭐ NUEVO: Abrir cajón automáticamente si la venta es en efectivo (o mixto con efectivo)
+    // y NO es una venta a crédito.
+    const hasCash = 
+      sale.payment?.method === 'cash' || 
+      (sale.payment?.method === 'mixed' && Number(sale.payment.cashReceived) > 0)
+
+    if (hasCash && !sale.isCreditPayment) {
+      try {
+        const drawerBuffer = getOpenDrawerBuffer(0)
+        await sendToPrinter(drawerBuffer)
+        console.log('✅ Cajón abierto automáticamente por venta en efectivo')
+      } catch (err) {
+        console.warn('⚠️ No se pudo abrir el cajón automáticamente:', err.message)
+        // No detenemos la impresión del ticket si falla el cajón
+      }
+    }
 
     const printer = createPrinter()
 
@@ -161,21 +179,31 @@ app.post('/print-receipt', async (req, res) => {
 
     printer.println(`Metodo:   ${methodLabel}`)
 
-    // Efectivo puro
-    if (sale.payment?.method === 'cash') {
-      printer.println(`Recibido: $${Number(sale.payment.cashReceived || 0).toLocaleString('es-MX')}`)
-      printer.println(`Cambio:   $${Number(sale.payment.change || 0).toLocaleString('es-MX')}`)
-    }
-
-    // Pago mixto
-    if (sale.payment?.method === 'mixed') {
-      const cashPart = Number(sale.payment.cashReceived || 0)
-      const transferPart = Number(sale.payment.transferReceived || 0)
-      if (cashPart > 0) {
-        printer.println(`  Efectivo:  $${cashPart.toLocaleString('es-MX')}`)
+    // 🆕 Si es un abono, imprimimos el desglose de la deuda
+    if (sale.isCreditPayment) {
+      printer.println(`Abono:    $${Number(sale.payment.amountPaid || 0).toLocaleString('es-MX')}`)
+      printer.println(`Restaba:  $${Number(sale.payment.previousOutstanding || 0).toLocaleString('es-MX')}`)
+      printer.drawLine()
+      printer.bold(true)
+      printer.println(`RESTA POR PAGAR: $${Number(sale.payment.newOutstanding || 0).toLocaleString('es-MX')}`)
+      printer.bold(false)
+    } else {
+      // Efectivo puro
+      if (sale.payment?.method === 'cash') {
+        printer.println(`Recibido: $${Number(sale.payment.cashReceived || 0).toLocaleString('es-MX')}`)
+        printer.println(`Cambio:   $${Number(sale.payment.change || 0).toLocaleString('es-MX')}`)
       }
-      if (transferPart > 0) {
-        printer.println(`  Transf:    $${transferPart.toLocaleString('es-MX')}`)
+
+      // Pago mixto
+      if (sale.payment?.method === 'mixed') {
+        const cashPart = Number(sale.payment.cashReceived || 0)
+        const transferPart = Number(sale.payment.transferReceived || 0)
+        if (cashPart > 0) {
+          printer.println(`  Efectivo:  $${cashPart.toLocaleString('es-MX')}`)
+        }
+        if (transferPart > 0) {
+          printer.println(`  Transf:    $${transferPart.toLocaleString('es-MX')}`)
+        }
       }
     }
 
@@ -190,12 +218,13 @@ app.post('/print-receipt', async (req, res) => {
     if (footer.returnPolicy)    printer.println(footer.returnPolicy)
     if (footer.website)         printer.println(footer.website)
     if (footer.name)            printer.println(`*** ${footer.name} ***`)
-    printer.newLine()
-    printer.newLine()
-    printer.newLine()
+    
+    // ⭐ Enviamos el comando de corte con margen
+    printer.cut()
 
     // -------- ENVIAR --------
     const buffer = printer.getBuffer()
+    
     try {
       await sendToPrinter(buffer)
       console.log(`✅ Ticket impreso · ${sale.folio}`)
