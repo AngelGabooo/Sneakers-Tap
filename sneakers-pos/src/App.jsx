@@ -4,7 +4,8 @@ import { useView } from './context/ViewContext'
 import { usePermissions } from './hooks/usePermissions'
 import { FALLBACK_VIEW_ORDER } from './data/viewPermissions'
 import OfflineBanner from './components/common/OfflineBanner'
-import OpenDrawerButton from './components/common/OpenDrawerButton'   // 👈 NUEVO
+import OpenDrawerButton from './components/common/OpenDrawerButton'
+import UpdateAlertBanner from './components/common/UpdateAlertBanner' // 👈 NUEVO IMPORT
 
 import Login from './pages/Login'
 import NoAccess from './pages/NoAccess'
@@ -29,7 +30,7 @@ import Wholesale from './pages/Wholesale'
 import WholesaleDetail from './pages/WholesaleDetail'
 import WholesaleNew from './pages/WholesaleNew'
 import Credits from './pages/Credits'
-import Promotions from './pages/Promotions'   // 🎁 PROMO
+import Promotions from './pages/Promotions'
 import Users from './pages/Users'
 import UserCreate from './pages/UserCreate'
 import UserEdit from './pages/UserEdit'
@@ -65,7 +66,7 @@ const VIEWS = {
   'wholesale-new':        WholesaleNew,
   'wholesale-edit':       WholesaleDetail,
   credits:                Credits,
-  promotions:             Promotions,          // 🎁 PROMO
+  promotions:             Promotions,
   users:                  Users,
   'user-new':             UserCreate,
   'user-edit':            UserEdit,
@@ -113,16 +114,18 @@ export default function App() {
       return (
         <>
           <OfflineBanner />
+          <UpdateAlertBanner />   {/* 👈 NUEVO */}
           <FallbackView />
-          <OpenDrawerButton />   {/* 👈 NUEVO */}
+          <OpenDrawerButton />
         </>
       )
     }
     return (
       <>
         <OfflineBanner />
+        <UpdateAlertBanner />   {/* 👈 NUEVO */}
         <NoAccess />
-        <OpenDrawerButton />   {/* 👈 NUEVO */}
+        <OpenDrawerButton />
       </>
     )
   }
@@ -131,8 +134,9 @@ export default function App() {
     return (
       <>
         <OfflineBanner />
+        <UpdateAlertBanner />   {/* 👈 NUEVO */}
         <NoAccess />
-        <OpenDrawerButton />   {/* 👈 NUEVO */}
+        <OpenDrawerButton />
       </>
     )
   }
@@ -141,8 +145,9 @@ export default function App() {
   return (
     <>
       <OfflineBanner />
+      <UpdateAlertBanner />   {/* 👈 NUEVO */}
       <CurrentView />
-      <OpenDrawerButton />   {/* 👈 NUEVO */}
+      <OpenDrawerButton />
     </>
   )
 }
