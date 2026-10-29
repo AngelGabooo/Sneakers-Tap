@@ -47,7 +47,7 @@ export default function ReportDetail() {
   // Cálculos por categoría
   // ------------------------------------------------------------------
   const { kpis, chart, table } = useMemo(() => {
-    // ------- VENTAS -------
+    // ------- VENTAS (CORREGIDO CON NOMBRES DE PRODUCTOS) -------
     if (category === 'sales') {
       const valid = filteredSales.filter((s) => s.status !== 'cancelled')
       const netSales = valid.reduce((a, s) => a + (Number(s.total) || 0), 0)
@@ -68,16 +68,24 @@ export default function ReportDetail() {
         dayMap.set(key, curr)
       })
 
-      const rows = valid.map((s) => ({
-        id: s.id,
-        folio: `#${s.folio}`,
-        customer: s.customerName || 'Venta general',
-        items: (s.items || []).length,
-        total: Number(s.total) || 0,
-        payment: s.payment?.methodLabel || '—',
-        cashier: s.cashier || '—',
-        date: new Date(s.createdAt).toLocaleDateString('es-MX'),
-      }))
+      const rows = valid.map((s) => {
+        // 🧠 Extraemos los nombres de los productos de esta venta
+        const productNames = (s.items || [])
+          .map((i) => i.productName || i.sku || 'Producto')
+          .join(', ') // Si hay varios, se separan por coma
+
+        return {
+          id: s.id,
+          folio: `#${s.folio}`,
+          date: new Date(s.createdAt).toLocaleDateString('es-MX'),
+          customer: s.customerName || 'Venta general',
+          productNames: productNames || '—', // 👈 NUEVA COLUMNA: Nombre del producto
+          items: (s.items || []).length,
+          total: Number(s.total) || 0,
+          payment: s.payment?.methodLabel || '—',
+          cashier: s.cashier || '—',
+        }
+      })
 
       return {
         kpis: [
@@ -93,39 +101,70 @@ export default function ReportDetail() {
         },
         table: {
           columns: [
-            { key: 'folio',    label: 'Folio',     emphasis: true },
-            { key: 'date',     label: 'Fecha' },
-            { key: 'customer', label: 'Cliente' },
-            { key: 'items',    label: 'Productos', align: 'right' },
-            { key: 'total',    label: 'Total', align: 'right', emphasis: true, renderPrint: (r) => fmtMoney(r.total) },
-            { key: 'payment',  label: 'Método' },
-            { key: 'cashier',  label: 'Cajero' },
+            { key: 'folio',        label: 'Folio',            emphasis: true },
+            { key: 'date',         label: 'Fecha' },
+            { key: 'productNames', label: 'Producto',         emphasis: true }, // 👈 NUEVA COLUMNA
+            { key: 'customer',     label: 'Cliente' },
+            { key: 'items',        label: 'Cant.',            align: 'right' },
+            { key: 'total',        label: 'Total',            align: 'right', emphasis: true, renderPrint: (r) => fmtMoney(r.total) },
+            { key: 'payment',      label: 'Método' },
+            { key: 'cashier',      label: 'Cajero' },
           ],
           rows,
         },
       }
     }
 
-    // ------- PRODUCTOS -------
+    // ------- PRODUCTOS (CORREGIDO) -------
     if (category === 'products') {
       const map = new Map()
-      filteredSales.filter((s) => s.status !== 'cancelled').forEach((s) => {
-        (s.items || []).forEach((i) => {
-          const key = i.productId || i.productName
-          const curr = map.get(key) || { id: key, name: i.productName, units: 0, sales: 0, revenue: 0 }
-          curr.units += Number(i.quantity) || 0
-          curr.sales += 1
-          curr.revenue += (Number(i.price) || 0) * (Number(i.quantity) || 0)
-          map.set(key, curr)
+
+      filteredSales
+        .filter((s) => s.status !== 'cancelled')
+        .forEach((s) => {
+          (s.items || []).forEach((i) => {
+            const key = `${i.productId || i.productName}__${i.variantId || 'root'}`
+            const fromCatalog = products.find((p) => p.id === i.productId)
+            const resolvedName =
+              (i.productName && i.productName.trim()) ||
+              fromCatalog?.name ||
+              'Producto sin nombre'
+
+            const curr = map.get(key) || {
+              id: key,
+              name: resolvedName,
+              variantLabel: i.variantLabel || '—',
+              sku: i.sku || '—',
+              units: 0,
+              sales: 0,
+              revenue: 0,
+            }
+
+            if (!curr.name || curr.name === 'Producto sin nombre') {
+              curr.name = resolvedName
+            }
+
+            curr.units += Number(i.quantity) || 0
+            curr.sales += 1
+            curr.revenue += (Number(i.price) || 0) * (Number(i.quantity) || 0)
+            map.set(key, curr)
+          })
         })
-      })
+
       const list = Array.from(map.values()).sort((a, b) => b.revenue - a.revenue)
       const totalRevenue = list.reduce((a, p) => a + p.revenue, 0)
       const totalUnits = list.reduce((a, p) => a + p.units, 0)
 
+      const chartLabel = (p) => {
+        const name = p.name.length > 12 ? `${p.name.slice(0, 12)}…` : p.name
+        return p.variantLabel && p.variantLabel !== '—'
+          ? `${name} (${p.variantLabel})`
+          : name
+      }
+
       return {
         kpis: [
-          { key: 'revenue', label: 'Ingresos',          value: fmtMoney(totalRevenue), helper: `${list.length} productos` },
+          { key: 'revenue', label: 'Ingresos',          value: fmtMoney(totalRevenue), helper: `${list.length} variantes` },
           { key: 'units',   label: 'Unidades vendidas', value: totalUnits,             helper: 'unidades' },
           { key: 'top',     label: 'Top producto',      value: list[0]?.name || '—',   helper: list[0] ? fmtMoney(list[0].revenue) : '' },
         ],
@@ -133,16 +172,41 @@ export default function ReportDetail() {
           title: 'Top productos por ingresos',
           subtitle: 'Los 8 productos con más ingresos.',
           type: 'bar',
-          data: list.slice(0, 8).map((p) => ({ label: p.name.slice(0, 14), value: p.revenue })),
+          data: list.slice(0, 8).map((p) => ({
+            label: chartLabel(p),
+            value: p.revenue,
+          })),
         },
         table: {
           columns: [
-            { key: 'name',    label: 'Producto', emphasis: true },
-            { key: 'units',   label: 'Unidades', align: 'right' },
-            { key: 'sales',   label: 'Ventas',   align: 'right' },
-            { key: 'revenue', label: 'Ingresos', align: 'right', emphasis: true, renderPrint: (r) => fmtMoney(r.revenue) },
+            { 
+              key: 'name',         
+              label: 'Producto',   
+              emphasis: true,
+              renderPrint: (r) => r.name || r.id 
+            },
+            { 
+              key: 'variantLabel', 
+              label: 'Variante',
+              renderPrint: (r) => r.variantLabel || '—'
+            },
+            { 
+              key: 'sku',          
+              label: 'SKU (Clave)',
+              renderPrint: (r) => r.sku || '—'
+            },
+            { key: 'units',        label: 'Unidades',   align: 'right' },
+            { key: 'sales',        label: 'Ventas',     align: 'right' },
+            { 
+              key: 'revenue',      
+              label: 'Ingresos',   
+              align: 'right', 
+              emphasis: true, 
+              renderPrint: (r) => fmtMoney(r.revenue) 
+            },
           ],
           rows: list.slice(0, 20),
+          emptyMessage: 'No hay productos vendidos en el periodo.',
         },
       }
     }
